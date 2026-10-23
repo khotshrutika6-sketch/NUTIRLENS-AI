@@ -1,0 +1,10 @@
+{
+  "description": "Track nutrition, detect food spoilage, and monitor environmental conditions with an AI-powered platform designed for health-conscious users.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
