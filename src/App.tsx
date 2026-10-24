@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { signInWithEmail, signInWithGoogle, auth } from "./firebase"
 import { onAuthStateChanged } from "firebase/auth"
+import {
+  analyzeMealWithGemini,
+  DEFAULT_GEMINI_KEY,
+  type MealAnalysis,
+} from "./gemini"
+
 
 
 type Step = "auth" | "plans" | "profile" | "dashboard" | "sensor" | "scanner" | "analytics" | "history" | "settings"
@@ -32,7 +38,7 @@ function AiMark({ size = 28 }: { size?: number }) {
   )
 }
 
-function Icon({ name, size = 20 }: { name: IconName size?: number }) {
+function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
     home: (
       <>
@@ -319,7 +325,7 @@ const plans = [
   },
 ]
 
-function Plans({ next, back }: { next: () => void back: () => void }) {
+function Plans({ next, back }: { next: () => void; back: () => void }) {
   const [yearly, setYearly] = useState(true)
   return (
     <div className="flow-page">
@@ -392,7 +398,7 @@ function Plans({ next, back }: { next: () => void back: () => void }) {
   )
 }
 
-function FlowHeader({ step, back }: { step: number back: () => void }) {
+function FlowHeader({ step, back }: { step: number; back: () => void }) {
   return (
     <header className="flow-header">
       <Brand />
@@ -402,7 +408,7 @@ function FlowHeader({ step, back }: { step: number back: () => void }) {
   )
 }
 
-function Profile({ next, back }: { next: () => void back: () => void }) {
+function Profile({ next, back }: { next: () => void; back: () => void }) {
   const [weight, setWeight] = useState(58)
   const [target, setTarget] = useState(54)
   const [goal, setGoal] = useState("Maintain Health")
@@ -541,17 +547,296 @@ function Profile({ next, back }: { next: () => void back: () => void }) {
   )
 }
 
-function Dashboard({ restart, step, setStep }: { restart: () => void; step: Step; setStep: (s: Step) => void }) {
-  const [image, setImage] = useState(FOOD_IMAGE)
+const PRESET_MEALS = [
+  {
+    name: "Avocado Egg Toast",
+    icon: "🥑",
+    img: "https://images.unsplash.com/photo-1525351484163-7529414344d8?auto=format&fit=crop&w=1200&q=80",
+    analysis: {
+      mealName: "Avocado Egg Toast",
+      calories: 450,
+      carbs: 42,
+      protein: 18,
+      fat: 22,
+      fiber: 8,
+      sugars: 3,
+      freshnessScore: 98,
+      qualityBadge: "Looks Fresh 98%",
+      insight: "Balanced and fiber-rich. Add berries for an extra antioxidant boost.",
+      minerals: [
+        { name: "Sodium", value: "320mg", percent: 64 },
+        { name: "Potassium", value: "480mg", percent: 78 },
+        { name: "Iron", value: "15%", percent: 45 },
+        { name: "Vitamin C", value: "25%", percent: 62 },
+      ],
+      detections: [
+        { label: "Avocado Toast · 97%", confidence: 0.97, position: { top: "28%", left: "18%" } },
+        { label: "Poached Egg · 96%", confidence: 0.96, position: { bottom: "24%", right: "20%" } },
+      ],
+    },
+  },
+  {
+    name: "Mediterranean Grain Bowl",
+    icon: "🥗",
+    img: "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=1200&q=80",
+    analysis: {
+      mealName: "Mediterranean Grain Bowl",
+      calories: 485,
+      carbs: 58,
+      protein: 21,
+      fat: 16,
+      fiber: 12,
+      sugars: 6,
+      freshnessScore: 96,
+      qualityBadge: "High Vitality 96%",
+      insight: "Rich in diverse phytonutrients and prebiotic fibers that strengthen digestive health.",
+      minerals: [
+        { name: "Sodium", value: "410mg", percent: 52 },
+        { name: "Potassium", value: "620mg", percent: 85 },
+        { name: "Iron", value: "28%", percent: 72 },
+        { name: "Vitamin C", value: "45%", percent: 90 },
+      ],
+      detections: [
+        { label: "Quinoa Greens · 98%", confidence: 0.98, position: { top: "35%", left: "25%" } },
+        { label: "Crispy Chickpeas · 94%", confidence: 0.94, position: { bottom: "30%", right: "22%" } },
+      ],
+    },
+  },
+  {
+    name: "Wild Salmon Fillet",
+    icon: "🍣",
+    img: "https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=1200&q=80",
+    analysis: {
+      mealName: "Wild Salmon with Asparagus",
+      calories: 520,
+      carbs: 12,
+      protein: 44,
+      fat: 31,
+      fiber: 5,
+      sugars: 2,
+      freshnessScore: 99,
+      qualityBadge: "Peak Fresh 99%",
+      insight: "High in long-chain Omega-3 EPA/DHA fatty acids and premium lean protein for metabolic longevity.",
+      minerals: [
+        { name: "Sodium", value: "280mg", percent: 40 },
+        { name: "Potassium", value: "710mg", percent: 92 },
+        { name: "Iron", value: "18%", percent: 55 },
+        { name: "Vitamin C", value: "35%", percent: 70 },
+      ],
+      detections: [
+        { label: "Grilled Salmon · 99%", confidence: 0.99, position: { top: "25%", left: "30%" } },
+        { label: "Tender Asparagus · 97%", confidence: 0.97, position: { bottom: "25%", left: "20%" } },
+      ],
+    },
+  },
+  {
+    name: "Organic Acai Bowl",
+    icon: "🍓",
+    img: "https://images.unsplash.com/photo-1590301157890-4810ed352733?auto=format&fit=crop&w=1200&q=80",
+    analysis: {
+      mealName: "Acai Superfood Bowl",
+      calories: 360,
+      carbs: 52,
+      protein: 9,
+      fat: 14,
+      fiber: 11,
+      sugars: 24,
+      freshnessScore: 97,
+      qualityBadge: "Antioxidant Rich 97%",
+      insight: "Loaded with anthocyanins and healthy fats from seeds. Great restorative breakfast or snack.",
+      minerals: [
+        { name: "Sodium", value: "65mg", percent: 12 },
+        { name: "Potassium", value: "390mg", percent: 60 },
+        { name: "Iron", value: "14%", percent: 42 },
+        { name: "Vitamin C", value: "85%", percent: 95 },
+      ],
+      detections: [
+        { label: "Acai Puree · 98%", confidence: 0.98, position: { top: "40%", left: "30%" } },
+        { label: "Fresh Blueberries · 96%", confidence: 0.96, position: { top: "20%", right: "25%" } },
+      ],
+    },
+  },
+]
+
+interface MealLogItem {
+  icon: string
+  name: string
+  weight: string
+  calories: string
+  carbs: string
+  protein: string
+  time: string
+}
+
+function Dashboard({
+  restart,
+  step,
+  setStep,
+  onSignOut,
+}: {
+  restart: () => void
+  step: Step
+  setStep: (s: Step) => void
+  onSignOut?: () => void
+}) {
+  const [image, setImage] = useState(PRESET_MEALS[0].img)
+  const [analysis, setAnalysis] = useState<MealAnalysis>(PRESET_MEALS[0].analysis)
+  const [activePreset, setActivePreset] = useState<string>("Avocado Egg Toast")
   const [scanning, setScanning] = useState(false)
-  const fileChange = (file?: File) => {
-    if (!file) return
-    setImage(URL.createObjectURL(file))
-    setScanning(true)
-    window.setTimeout(() => setScanning(false), 1400)
+  const [scanStatus, setScanStatus] = useState("Gemini AI is analyzing your meal…")
+  const [scanError, setScanError] = useState<string | null>(null)
+  const [showKeyModal, setShowKeyModal] = useState(false)
+  const [apiKey, setApiKey] = useState(() => {
+    return localStorage.getItem("NUTRILENS_GEMINI_KEY") || DEFAULT_GEMINI_KEY
+  })
+  const [keyInput, setKeyInput] = useState(apiKey)
+  const [testResult, setTestResult] = useState<string | null>(null)
+
+  const [mealLogs, setMealLogs] = useState<MealLogItem[]>([
+    {
+      icon: "🥑",
+      name: "Avocado Egg Toast",
+      weight: "240g",
+      calories: "450",
+      carbs: "42g",
+      protein: "18g",
+      time: "Breakfast · 8:40 AM",
+    },
+    {
+      icon: "🥗",
+      name: "Garden Power Bowl",
+      weight: "310g",
+      calories: "386",
+      carbs: "48g",
+      protein: "24g",
+      time: "Lunch · 1:15 PM",
+    },
+    {
+      icon: "🥜",
+      name: "Apple & Almonds",
+      weight: "130g",
+      calories: "270",
+      carbs: "31g",
+      protein: "8g",
+      time: "Snack · 4:20 PM",
+    },
+  ])
+
+  // Total daily consumed calories
+  const totalCaloriesConsumed = useMemo(() => {
+    return mealLogs.reduce((sum, item) => sum + (parseInt(item.calories, 10) || 0), 0)
+  }, [mealLogs])
+
+  const handleSaveApiKey = () => {
+    const trimmed = keyInput.trim()
+    if (!trimmed) return
+    localStorage.setItem("NUTRILENS_GEMINI_KEY", trimmed)
+    setApiKey(trimmed)
+    setTestResult("API Key saved successfully!")
+    setTimeout(() => {
+      setTestResult(null)
+      setShowKeyModal(false)
+    }, 1200)
   }
+
+  // Handle preset selection
+  const selectPreset = (preset: (typeof PRESET_MEALS)[0]) => {
+    setActivePreset(preset.name)
+    setImage(preset.img)
+    setAnalysis(preset.analysis)
+    setScanError(null)
+  }
+
+  // Handle file upload or camera photo
+  const fileChange = async (file?: File) => {
+    if (!file) return
+    const previewUrl = URL.createObjectURL(file)
+    setImage(previewUrl)
+    setActivePreset("")
+    setScanning(true)
+    setScanError(null)
+    setScanStatus("Analyzing photo with Gemini 2.5 Flash Vision…")
+
+    try {
+      const result = await analyzeMealWithGemini(file, apiKey)
+      setAnalysis(result)
+
+      // Automatically append to today's meal log
+      const now = new Date()
+      const timeStr = `Scanned · ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      const newItem: MealLogItem = {
+        icon: "🍽️",
+        name: result.mealName,
+        weight: "280g",
+        calories: `${result.calories}`,
+        carbs: `${result.carbs}g`,
+        protein: `${result.protein}g`,
+        time: timeStr,
+      }
+      setMealLogs((prev) => [newItem, ...prev])
+    } catch (err: any) {
+      console.error("Gemini Scan Error:", err)
+      setScanError(err.message || "Failed to scan meal with Gemini AI. Please check your API key.")
+    } finally {
+      setScanning(false)
+    }
+  }
+
   return (
     <div className="app">
+      {/* Gemini API Key Configuration Modal */}
+      {showKeyModal && (
+        <div className="api-modal-backdrop" onClick={() => setShowKeyModal(false)}>
+          <div className="api-modal" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <AiMark size={24} />
+                <h3 style={{ font: "700 18px var(--display)", margin: 0 }}>Gemini Vision API Key</h3>
+              </div>
+              <button
+                onClick={() => setShowKeyModal(false)}
+                style={{ border: 0, background: "transparent", fontSize: "16px", cursor: "pointer", fontWeight: 800 }}
+              >
+                ✕
+              </button>
+            </div>
+            <p style={{ fontSize: "11px", color: "var(--muted)", margin: "0 0 12px", lineHeight: 1.5 }}>
+              Your meal photo scanner uses Google's <strong>Gemini 2.5 Flash</strong> vision model for calorie estimation, nutrient breakdown, and freshness analysis.
+            </p>
+            <label style={{ display: "block", fontSize: "11px", fontWeight: 800, marginBottom: "4px" }}>
+              Google Gemini API Key
+              <input
+                className="api-input"
+                type="text"
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                placeholder="Enter AQ... or AIza... key"
+              />
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "14px 0 0" }}>
+              <span style={{ fontSize: "10px", color: "#166534", background: "#dcfce7", padding: "4px 8px", borderRadius: "99px", fontWeight: 800 }}>
+                ● Active (50 models ready)
+              </span>
+              <span style={{ fontSize: "10px", color: "var(--muted)", marginLeft: "auto" }}>
+                Model: gemini-2.5-flash
+              </span>
+            </div>
+            {testResult && (
+              <p style={{ fontSize: "11px", color: "#166534", fontWeight: 700, margin: "10px 0 0" }}>{testResult}</p>
+            )}
+            <div style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
+              <Button kind="outline" onClick={() => setShowKeyModal(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveApiKey}>
+                Save Key
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Sidebar */}
       <aside className="sidebar">
         <Brand light />
         <nav>
@@ -579,191 +864,295 @@ function Dashboard({ restart, step, setStep }: { restart: () => void; step: Step
           <p>You saved 1.4 kg of food this month.</p>
         </div>
       </aside>
+
       <div className="app-main">
+        {/* Topbar */}
         <header className="topbar">
           <div className="top-pills">
-            <button className="active">Scanner</button>
-            <button>IoT Monitor</button>
-            <button>Analytics</button>
+            <button
+              className={step === "dashboard" || step === "scanner" ? "active" : ""}
+              onClick={() => setStep("scanner")}
+            >
+              Scanner
+            </button>
+            <button
+              className={step === "sensor" ? "active" : ""}
+              onClick={() => setStep("sensor")}
+            >
+              IoT Monitor
+            </button>
+            <button
+              className={step === "analytics" ? "active" : ""}
+              onClick={() => setStep("analytics")}
+            >
+              Analytics
+            </button>
           </div>
           <div className="top-actions">
+            <button
+              className="gemini-pill gemini-pill-btn"
+              onClick={() => setShowKeyModal(true)}
+              title="Click to manage Gemini API Key"
+            >
+              <AiMark size={20} />
+              <span>Gemini 2.5 Flash</span>
+              <i />
+            </button>
             <div className="profile">
-              <span>SR</span>
+              <span>SK</span>
               <div>
-                <strong>Shrutika</strong>
+                <strong>Shrutika Khot</strong>
                 <small>Pro Member</small>
               </div>
             </div>
-            <Button kind="light">
-              <Icon name="plus" size={17} /> Scan Meal
-            </Button>
+            {onSignOut && (
+              <Button kind="light" onClick={onSignOut}>
+                Sign Out
+              </Button>
+            )}
           </div>
         </header>
-        <main className="dashboard">
-          <div className="dashboard-title">
-            <div>
-              <span className="eyebrow">Gemini vision lab</span>
-              <h1>What’s on your plate?</h1>
+
+        {/* View Switcher based on `step` */}
+        {step === "sensor" ? (
+          <IoTTelemetry restart={() => setStep("dashboard")} />
+        ) : step === "analytics" ? (
+          <AnalyticsView totalCalories={totalCaloriesConsumed} restart={() => setStep("dashboard")} />
+        ) : step === "history" ? (
+          <MealHistoryView mealLogs={mealLogs} restart={() => setStep("dashboard")} />
+        ) : step === "settings" ? (
+          <SettingsView
+            apiKey={apiKey}
+            onOpenKeyModal={() => setShowKeyModal(true)}
+            onSignOut={onSignOut}
+            restart={() => setStep("dashboard")}
+          />
+        ) : (
+          /* Default: Dashboard / Scanner */
+          <main className="dashboard">
+            <div className="dashboard-title">
+              <div>
+                <span className="eyebrow">Gemini Vision Lab</span>
+                <h1>What’s on your plate?</h1>
+              </div>
+              <div
+                className="gemini-pill gemini-pill-btn"
+                onClick={() => setShowKeyModal(true)}
+                title="Gemini API Key active"
+              >
+                <AiMark size={23} />
+                <span>Powered by Gemini 2.5 Flash</span>
+                <i /> Ready
+              </div>
             </div>
-            <div className="gemini-pill">
-              <AiMark size={23} />
-              <span>Powered by Gemini AI</span>
-              <i /> Ready
-            </div>
-          </div>
-          <div className="scanner-layout">
-            <Card className="vision-card">
-              <div className="vision-head">
-                <div>
-                  <h2>Live meal analysis</h2>
-                  <p>Upload a photo and let Gemini decode the details.</p>
-                </div>
-                <span className="fresh">● Looks Fresh 98%</span>
-              </div>
-              <div className="food-preview">
-                {image ? (
-                  <img src={image} alt="Food meal ready for AI analysis" />
-                ) : (
-                  <div className="empty-preview">
-                    <Icon name="camera" size={38} />
-                    <p>Your meal preview will appear here</p>
-                  </div>
-                )}
-                <span className="box box--toast">Avocado Toast · 97%</span>
-                <span className="box box--egg">Poached Egg · 96%</span>
-                {scanning && (
-                  <div className="scanning">
-                    <AiMark size={40} />
-                    <strong>Gemini is analyzing your meal…</strong>
-                  </div>
-                )}
-              </div>
-              <label className="dropzone">
-                <Icon name="upload" />
-                <div>
-                  <strong>Upload meal photo</strong>
-                  <span>or click for live camera capture</span>
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={(e) => fileChange(e.target.files?.[0])}
-                />
-                <Button kind="outline">
-                  <Icon name="camera" size={17} /> Choose image
-                </Button>
-              </label>
-            </Card>
-            <Card className="nutrition-card" mint>
-              <div className="nutrition-head">
-                <div>
-                  <span className="mini-badge">AI estimate</span>
-                  <h2>Avocado Egg Toast</h2>
-                </div>
-                <strong>
-                  450 <small>kcal</small>
-                </strong>
-              </div>
-              <div className="macro-stats">
-                <div>
-                  <span>Carbohydrates</span>
-                  <strong>42g</strong>
-                  <small>Fiber 8g · Sugars 3g</small>
-                </div>
-                <div>
-                  <span>Protein</span>
-                  <strong>18g</strong>
-                  <small>High-quality protein</small>
-                </div>
-                <div>
-                  <span>Fats</span>
-                  <strong>22g</strong>
-                  <small>Saturated 4g</small>
-                </div>
-              </div>
-              <h3>Key minerals & vitamins</h3>
-              {[
-                ["Sodium", "320mg", 64],
-                ["Potassium", "480mg", 78],
-                ["Iron", "15%", 45],
-                ["Vitamin C", "25%", 62],
-              ].map(([name, value, width]) => (
-                <div className="mineral" key={name}>
-                  <span>{name}</span>
-                  <div>
-                    <i style={{ width: `${width}%` }} />
-                  </div>
-                  <strong>{value}</strong>
-                </div>
+
+            {/* Preset Test Meals Selector */}
+            <div className="preset-bar">
+              <span>Instant Test Meals:</span>
+              {PRESET_MEALS.map((p) => (
+                <button
+                  key={p.name}
+                  className={`preset-chip ${activePreset === p.name ? "active" : ""}`}
+                  onClick={() => selectPreset(p)}
+                >
+                  <span>{p.icon}</span> {p.name}
+                </button>
               ))}
-              <div className="ai-note">
-                <AiMark size={24} />
+            </div>
+
+            {scanError && (
+              <div className="scanner-error">
+                <span>⚠️ {scanError}</span>
+                <button
+                  onClick={() => setShowKeyModal(true)}
+                  style={{ border: 0, background: "#fff", padding: "4px 8px", borderRadius: "6px", cursor: "pointer", fontWeight: 700 }}
+                >
+                  Configure API Key
+                </button>
+              </div>
+            )}
+
+            <div className="scanner-layout">
+              {/* Vision Card with Preview */}
+              <Card className="vision-card">
+                <div className="vision-head">
+                  <div>
+                    <h2>Live meal analysis</h2>
+                    <p>Upload a photo or capture with camera for instant AI nutritional breakdown.</p>
+                  </div>
+                  <span className="fresh">● {analysis.qualityBadge || "Looks Fresh 98%"}</span>
+                </div>
+                <div className="food-preview">
+                  {image ? (
+                    <img src={image} alt={analysis.mealName || "Meal ready for AI analysis"} />
+                  ) : (
+                    <div className="empty-preview">
+                      <Icon name="camera" size={38} />
+                      <p>Your meal preview will appear here</p>
+                    </div>
+                  )}
+
+                  {/* Dynamic Bounding Detection Tags */}
+                  {analysis.detections &&
+                    analysis.detections.map((det, idx) => {
+                      const pos = det.position || {
+                        top: idx === 0 ? "28%" : "65%",
+                        left: idx === 0 ? "18%" : "60%",
+                      }
+                      return (
+                        <span
+                          key={det.label}
+                          className={`box ${idx === 1 ? "box--egg" : "box--toast"}`}
+                          style={{
+                            top: pos.top,
+                            left: pos.left,
+                            right: pos.right,
+                            bottom: pos.bottom,
+                          }}
+                        >
+                          {det.label}
+                        </span>
+                      )
+                    })}
+
+                  {/* Scanning Overlay */}
+                  {scanning && (
+                    <div className="scanning">
+                      <AiMark size={44} />
+                      <strong>Gemini 2.5 Flash is analyzing your plate…</strong>
+                      <span className="scanner-status">{scanStatus}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Dropzone with Camera / File Upload */}
+                <label className="dropzone">
+                  <Icon name="upload" />
+                  <div>
+                    <strong>Upload meal photo</strong>
+                    <span>Click to choose file or snap photo with camera</span>
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={(e) => fileChange(e.target.files?.[0])}
+                  />
+                  <Button kind="outline">
+                    <Icon name="camera" size={17} /> Choose image
+                  </Button>
+                </label>
+              </Card>
+
+              {/* Nutrition Card with Live AI Metrics */}
+              <Card className="nutrition-card" mint>
+                <div className="nutrition-head">
+                  <div>
+                    <span className="mini-badge">Gemini Estimate</span>
+                    <h2>{analysis.mealName}</h2>
+                  </div>
+                  <strong>
+                    {analysis.calories} <small>kcal</small>
+                  </strong>
+                </div>
+                <div className="macro-stats">
+                  <div>
+                    <span>Carbohydrates</span>
+                    <strong>{analysis.carbs}g</strong>
+                    <small>Fiber {analysis.fiber || 6}g · Sugars {analysis.sugars || 3}g</small>
+                  </div>
+                  <div>
+                    <span>Protein</span>
+                    <strong>{analysis.protein}g</strong>
+                    <small>High biological value</small>
+                  </div>
+                  <div>
+                    <span>Fats</span>
+                    <strong>{analysis.fat}g</strong>
+                    <small>Healthy lipids</small>
+                  </div>
+                </div>
+
+                <h3>Key minerals & vitamins</h3>
+                {(analysis.minerals && analysis.minerals.length > 0
+                  ? analysis.minerals
+                  : [
+                      { name: "Sodium", value: "320mg", percent: 64 },
+                      { name: "Potassium", value: "480mg", percent: 78 },
+                      { name: "Iron", value: "15%", percent: 45 },
+                      { name: "Vitamin C", value: "25%", percent: 62 },
+                    ]
+                ).map((mineral) => (
+                  <div className="mineral" key={mineral.name}>
+                    <span>{mineral.name}</span>
+                    <div>
+                      <i style={{ width: `${mineral.percent}%` }} />
+                    </div>
+                    <strong>{mineral.value}</strong>
+                  </div>
+                ))}
+
+                <div className="ai-note">
+                  <AiMark size={24} />
+                  <p>
+                    <strong>Gemini insight:</strong> {analysis.insight}
+                  </p>
+                </div>
+              </Card>
+            </div>
+
+            {/* IoT Pantry Notification */}
+            <div className="iot-banner">
+              <span>
+                <Icon name="alert" />
+              </span>
+              <div>
+                <strong>High moisture detected in pantry</strong>
                 <p>
-                  <strong>Gemini insight:</strong> Balanced and fiber-rich. Add
-                  berries for an extra antioxidant boost.
+                  Pantry Temp: 24°C &nbsp; | &nbsp; Humidity: 68% RH — consume baked goods soon to prevent spoilage.
                 </p>
               </div>
-            </Card>
-          </div>
-          <div className="iot-banner">
-            <span>
-              <Icon name="alert" />
-            </span>
-            <div>
-              <strong>High moisture detected in pantry</strong>
-              <p>
-                Pantry Temp: 24°C &nbsp; | &nbsp; Humidity: 68% RH — consume
-                baked goods soon.
-              </p>
+              <button onClick={() => setStep("sensor")}>View IoT telemetry →</button>
             </div>
-            <button>View IoT telemetry →</button>
-          </div>
-          <Card className="log-card">
-            <div className="log-head">
-              <div>
-                <h2>Today’s meal log</h2>
-                <p>1,106 of 2,000 kcal consumed</p>
-              </div>
-              <button onClick={restart}>Restart onboarding</button>
-            </div>
-            <div className="meal-table">
-              <div className="table-head">
-                <span>Meal</span>
-                <span>Weight</span>
-                <span>Calories</span>
-                <span>Carbs</span>
-                <span>Protein</span>
-                <span />
-              </div>
-              {[
-                ["🥑", "Avocado Egg Toast", "240g", "450", "42g", "18g"],
-                ["🥗", "Garden Power Bowl", "310g", "386", "48g", "24g"],
-                ["🥜", "Apple & Almonds", "130g", "270", "31g", "8g"],
-              ].map(([icon, name, ...data]) => (
-                <div className="meal-row" key={name}>
-                  <span className="meal-name">
-                    <b>{icon}</b>
-                    <span>
-                      <strong>{name}</strong>
-                      <small>
-                        {name.includes("Toast")
-                          ? "Breakfast · 8:40 AM"
-                          : name.includes("Bowl")
-                            ? "Lunch · 1:15 PM"
-                            : "Snack · 4:20 PM"}
-                      </small>
-                    </span>
-                  </span>
-                  {data.map((d) => (
-                    <span key={d}>{d}</span>
-                  ))}
-                  <button>•••</button>
+
+            {/* Meal Log Card */}
+            <Card className="log-card">
+              <div className="log-head">
+                <div>
+                  <h2>Today’s meal log</h2>
+                  <p>{totalCaloriesConsumed.toLocaleString()} of 2,000 kcal consumed</p>
                 </div>
-              ))}
-            </div>
-          </Card>
-        </main>
+                <button onClick={restart}>Restart onboarding</button>
+              </div>
+              <div className="meal-table">
+                <div className="table-head">
+                  <span>Meal</span>
+                  <span>Weight</span>
+                  <span>Calories</span>
+                  <span>Carbs</span>
+                  <span>Protein</span>
+                  <span />
+                </div>
+                {mealLogs.map((item, idx) => (
+                  <div className="meal-row" key={`${item.name}-${idx}`}>
+                    <span className="meal-name">
+                      <b>{item.icon}</b>
+                      <span>
+                        <strong>{item.name}</strong>
+                        <small>{item.time}</small>
+                      </span>
+                    </span>
+                    <span>{item.weight}</span>
+                    <span>{item.calories} kcal</span>
+                    <span>{item.carbs}</span>
+                    <span>{item.protein}</span>
+                    <button style={{ color: "var(--muted)", cursor: "pointer" }}>•••</button>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </main>
+        )}
       </div>
     </div>
   )
@@ -771,45 +1160,180 @@ function Dashboard({ restart, step, setStep }: { restart: () => void; step: Step
 
 function IoTTelemetry({ restart }: { restart: () => void }) {
   const readings = [
-    { label: "Temperature", value: "24°C", icon: "🌡️", status: "normal", bar: 60 },
-    { label: "Humidity", value: "68% RH", icon: "💧", status: "high", bar: 68 },
-    { label: "CO₂ Level", value: "412 ppm", icon: "🌿", status: "normal", bar: 41 },
-    { label: "Light Level", value: "280 lux", icon: "☀️", status: "normal", bar: 28 },
+    { label: "Pantry Temperature", value: "24.2°C", icon: "🌡️", status: "normal", bar: 58, sub: "Optimal range: 18–25°C" },
+    { label: "Relative Humidity", value: "68% RH", icon: "💧", status: "high", bar: 68, sub: "Threshold 60% — Warning" },
+    { label: "VOC / Spoilage Gas", value: "385 ppb", icon: "🌿", status: "normal", bar: 38, sub: "Fresh air baseline" },
+    { label: "Ambient Lighting", value: "280 lux", icon: "☀️", status: "normal", bar: 28, sub: "Dark pantry preservation" },
   ]
   return (
-    <div style={{ minHeight: "100vh", background: "var(--parchment)", padding: "32px" }}>
-      <div style={{ maxWidth: "900px", margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "28px" }}>
+    <div style={{ minHeight: "100vh", background: "var(--parchment)", padding: "28px" }}>
+      <div style={{ maxWidth: "1000px", margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px" }}>
           <div>
-            <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--sage)", textTransform: "uppercase", letterSpacing: "1px" }}>Live Sensor Data</span>
-            <h1 style={{ font: "700 36px var(--display)", margin: "4px 0 0" }}>IoT Telemetry</h1>
+            <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--sage)", textTransform: "uppercase", letterSpacing: "1px" }}>
+              Hardware Telemetry · ESP32 Sensor Grid
+            </span>
+            <h1 style={{ font: "700 36px var(--display)", margin: "4px 0 0" }}>IoT Pantry Monitor</h1>
           </div>
-          <button onClick={restart} style={{ border: "2px solid var(--ink)", borderRadius: "99px", padding: "8px 18px", background: "transparent", fontWeight: 800, cursor: "pointer" }}>← Back to Dashboard</button>
+          <button
+            onClick={restart}
+            style={{
+              border: "2px solid var(--ink)",
+              borderRadius: "99px",
+              padding: "8px 18px",
+              background: "#fff",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            ← Back to Scanner
+          </button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
+
+        {/* Pantry Alert Banner */}
+        <div
+          style={{
+            background: "#fef3c7",
+            border: "2px solid #f59e0b",
+            borderRadius: "14px",
+            padding: "16px 20px",
+            display: "flex",
+            gap: "14px",
+            alignItems: "center",
+            marginBottom: "24px",
+            boxShadow: "3px 3px 0 var(--ink)",
+          }}
+        >
+          <span style={{ fontSize: "32px" }}>⚠️</span>
+          <div>
+            <strong style={{ display: "block", fontFamily: "var(--display)", fontSize: "16px", color: "#92400e" }}>
+              High moisture detected in pantry compartment A
+            </strong>
+            <p style={{ fontSize: "12px", color: "#78350f", margin: "4px 0 0" }}>
+              Humidity reached 68% RH. Gemini recommendation: Consume baked goods and leafy greens within 48 hours to prevent mold spores.
+            </p>
+          </div>
+        </div>
+
+        {/* 4 Sensor Cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "24px" }}>
           {readings.map((r) => (
-            <div key={r.label} style={{ background: "#fff", border: "2px solid var(--ink)", borderRadius: "16px", padding: "20px", boxShadow: "3px 3px 0 var(--ink)" }}>
+            <div
+              key={r.label}
+              style={{
+                background: "#fff",
+                border: "2px solid var(--ink)",
+                borderRadius: "16px",
+                padding: "20px",
+                boxShadow: "4px 4px 0 var(--ink)",
+              }}
+            >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                <span style={{ fontSize: "24px" }}>{r.icon}</span>
-                <span style={{ fontSize: "9px", fontWeight: 800, padding: "4px 8px", borderRadius: "99px", background: r.status === "high" ? "#fef3c7" : "#dcfce7", color: r.status === "high" ? "#92400e" : "#166534" }}>
-                  {r.status === "high" ? "⚠ High" : "✓ Normal"}
+                <span style={{ fontSize: "28px" }}>{r.icon}</span>
+                <span
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: 800,
+                    padding: "4px 10px",
+                    borderRadius: "99px",
+                    background: r.status === "high" ? "#fee2e2" : "#dcfce7",
+                    color: r.status === "high" ? "#991b1b" : "#166534",
+                  }}
+                >
+                  {r.status === "high" ? "⚠ Elevated" : "✓ Optimal"}
                 </span>
               </div>
-              <div style={{ font: "700 28px var(--display)", marginBottom: "4px" }}>{r.value}</div>
-              <div style={{ fontSize: "10px", color: "var(--muted)", fontWeight: 800, marginBottom: "10px" }}>{r.label}</div>
-              <div style={{ height: "6px", background: "rgba(0,0,0,0.08)", borderRadius: "99px" }}>
-                <div style={{ height: "100%", width: `${r.bar}%`, borderRadius: "99px", background: r.status === "high" ? "#f59e0b" : "var(--sage)" }} />
+              <div style={{ font: "700 32px var(--display)", marginBottom: "4px" }}>{r.value}</div>
+              <div style={{ fontSize: "11px", color: "var(--muted)", fontWeight: 800, marginBottom: "4px" }}>{r.label}</div>
+              <div style={{ fontSize: "9px", color: "var(--muted)", marginBottom: "12px" }}>{r.sub}</div>
+              <div style={{ height: "7px", background: "rgba(0,0,0,0.08)", borderRadius: "99px", overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${r.bar}%`,
+                    borderRadius: "99px",
+                    background: r.status === "high" ? "#ef4444" : "var(--sage)",
+                  }}
+                />
               </div>
             </div>
           ))}
         </div>
-        <div style={{ background: "#fff", border: "2px solid var(--ink)", borderRadius: "16px", padding: "20px", boxShadow: "3px 3px 0 var(--ink)" }}>
-          <h2 style={{ font: "700 18px var(--display)", marginBottom: "12px" }}>Pantry Alert</h2>
-          <div style={{ background: "#fef3c7", border: "1.5px solid #f59e0b", borderRadius: "10px", padding: "14px", display: "flex", gap: "12px", alignItems: "center" }}>
-            <span style={{ fontSize: "28px" }}>⚠️</span>
-            <div>
-              <strong style={{ display: "block", fontFamily: "var(--display)", fontSize: "14px" }}>High moisture detected in pantry</strong>
-              <p style={{ fontSize: "11px", color: "#78350f", margin: "4px 0 0" }}>Humidity at 68% RH — consume baked goods soon to prevent mold.</p>
+      </div>
+    </div>
+  )
+}
+
+function AnalyticsView({ totalCalories, restart }: { totalCalories: number; restart: () => void }) {
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--parchment)", padding: "28px" }}>
+      <div style={{ maxWidth: "1000px", margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px" }}>
+          <div>
+            <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--sage)", textTransform: "uppercase", letterSpacing: "1px" }}>
+              Nutrition Intelligence
+            </span>
+            <h1 style={{ font: "700 36px var(--display)", margin: "4px 0 0" }}>Weekly Health Analytics</h1>
+          </div>
+          <button
+            onClick={restart}
+            style={{
+              border: "2px solid var(--ink)",
+              borderRadius: "99px",
+              padding: "8px 18px",
+              background: "#fff",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            ← Back to Scanner
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "24px" }}>
+          <div style={{ background: "#fff", border: "2px solid var(--ink)", borderRadius: "16px", padding: "24px", boxShadow: "4px 4px 0 var(--ink)" }}>
+            <h2 style={{ font: "700 20px var(--display)", marginBottom: "8px" }}>Daily Calorie Target</h2>
+            <div style={{ font: "700 42px var(--display)", color: "var(--sage-dark)" }}>
+              {totalCalories} <span style={{ fontSize: "16px", color: "var(--muted)" }}>/ 2,000 kcal</span>
+            </div>
+            <p style={{ fontSize: "11px", color: "var(--muted)", margin: "8px 0 16px" }}>
+              You've hit {Math.round((totalCalories / 2000) * 100)}% of your target for today.
+            </p>
+            <div style={{ height: "10px", background: "#e5e7eb", borderRadius: "99px", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${Math.min(100, Math.round((totalCalories / 2000) * 100))}%`, background: "var(--sage)" }} />
+            </div>
+          </div>
+
+          <div style={{ background: "#fff", border: "2px solid var(--ink)", borderRadius: "16px", padding: "24px", boxShadow: "4px 4px 0 var(--ink)" }}>
+            <h2 style={{ font: "700 20px var(--display)", marginBottom: "14px" }}>Target Macro Split</h2>
+            <div style={{ display: "grid", gap: "10px" }}>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 800, marginBottom: "4px" }}>
+                  <span>Carbohydrates</span>
+                  <span>50%</span>
+                </div>
+                <div style={{ height: "6px", background: "#e5e7eb", borderRadius: "99px" }}>
+                  <div style={{ height: "100%", width: "50%", background: "#f59e0b", borderRadius: "99px" }} />
+                </div>
+              </div>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 800, marginBottom: "4px" }}>
+                  <span>Protein</span>
+                  <span>25%</span>
+                </div>
+                <div style={{ height: "6px", background: "#e5e7eb", borderRadius: "99px" }}>
+                  <div style={{ height: "100%", width: "25%", background: "var(--sage)", borderRadius: "99px" }} />
+                </div>
+              </div>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 800, marginBottom: "4px" }}>
+                  <span>Healthy Fats</span>
+                  <span>25%</span>
+                </div>
+                <div style={{ height: "6px", background: "#e5e7eb", borderRadius: "99px" }}>
+                  <div style={{ height: "100%", width: "25%", background: "#6366f1", borderRadius: "99px" }} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -818,61 +1342,197 @@ function IoTTelemetry({ restart }: { restart: () => void }) {
   )
 }
 
+function MealHistoryView({ mealLogs, restart }: { mealLogs: MealLogItem[]; restart: () => void }) {
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--parchment)", padding: "28px" }}>
+      <div style={{ maxWidth: "1000px", margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px" }}>
+          <div>
+            <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--sage)", textTransform: "uppercase", letterSpacing: "1px" }}>
+              Journal & Log
+            </span>
+            <h1 style={{ font: "700 36px var(--display)", margin: "4px 0 0" }}>Meal History</h1>
+          </div>
+          <button
+            onClick={restart}
+            style={{
+              border: "2px solid var(--ink)",
+              borderRadius: "99px",
+              padding: "8px 18px",
+              background: "#fff",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            ← Back to Scanner
+          </button>
+        </div>
+
+        <div style={{ background: "#fff", border: "2px solid var(--ink)", borderRadius: "16px", padding: "20px", boxShadow: "4px 4px 0 var(--ink)" }}>
+          <div className="meal-table">
+            <div className="table-head">
+              <span>Meal Name</span>
+              <span>Serving</span>
+              <span>Calories</span>
+              <span>Carbs</span>
+              <span>Protein</span>
+              <span />
+            </div>
+            {mealLogs.map((item, idx) => (
+              <div className="meal-row" key={`${item.name}-${idx}`}>
+                <span className="meal-name">
+                  <b>{item.icon}</b>
+                  <span>
+                    <strong>{item.name}</strong>
+                    <small>{item.time}</small>
+                  </span>
+                </span>
+                <span>{item.weight}</span>
+                <span>{item.calories} kcal</span>
+                <span>{item.carbs}</span>
+                <span>{item.protein}</span>
+                <span style={{ fontSize: "10px", color: "var(--sage)", fontWeight: 800 }}>✓ Verified</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SettingsView({
+  apiKey,
+  onOpenKeyModal,
+  onSignOut,
+  restart,
+}: {
+  apiKey: string
+  onOpenKeyModal: () => void
+  onSignOut?: () => void
+  restart: () => void
+}) {
+  const maskedKey = apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-6)}` : "None"
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--parchment)", padding: "28px" }}>
+      <div style={{ maxWidth: "800px", margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px" }}>
+          <div>
+            <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--sage)", textTransform: "uppercase", letterSpacing: "1px" }}>
+              Configuration
+            </span>
+            <h1 style={{ font: "700 36px var(--display)", margin: "4px 0 0" }}>Settings</h1>
+          </div>
+          <button
+            onClick={restart}
+            style={{
+              border: "2px solid var(--ink)",
+              borderRadius: "99px",
+              padding: "8px 18px",
+              background: "#fff",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            ← Back to Scanner
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gap: "18px" }}>
+          {/* Gemini AI Key Section */}
+          <div style={{ background: "#fff", border: "2px solid var(--ink)", borderRadius: "16px", padding: "24px", boxShadow: "4px 4px 0 var(--ink)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+              <div>
+                <h2 style={{ font: "700 18px var(--display)", margin: "0 0 4px" }}>Gemini 2.5 Flash Vision Model</h2>
+                <p style={{ fontSize: "11px", color: "var(--muted)", margin: "0 0 12px" }}>
+                  Used for real-time photo food identification, macro analysis, and freshness scoring.
+                </p>
+                <code style={{ fontSize: "12px", background: "var(--parchment)", padding: "4px 10px", borderRadius: "6px", border: "1px solid var(--ink)" }}>
+                  Key: {maskedKey}
+                </code>
+              </div>
+              <Button kind="outline" onClick={onOpenKeyModal}>
+                Edit API Key
+              </Button>
+            </div>
+          </div>
+
+          {/* Account Profile */}
+          <div style={{ background: "#fff", border: "2px solid var(--ink)", borderRadius: "16px", padding: "24px", boxShadow: "4px 4px 0 var(--ink)" }}>
+            <h2 style={{ font: "700 18px var(--display)", margin: "0 0 8px" }}>User Profile</h2>
+            <p style={{ fontSize: "11px", color: "var(--muted)", margin: 0 }}>
+              Signed in via Firebase Authentication as <strong>Shrutika Khot</strong>.
+            </p>
+            {onSignOut && (
+              <div style={{ marginTop: "16px" }}>
+                <Button kind="primary" onClick={onSignOut}>
+                  Log Out of Session
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
-  const [step, setStep] = useState<Step>("auth");
-  const [loading, setLoading] = useState(true); // wait for Firebase to resolve auth
+  const [step, setStep] = useState<Step>("auth")
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user) {
-        // Already signed in — go to dashboard
-        setStep("dashboard");
+        setStep("dashboard")
       } else {
-        // No active session — must log in
-        setStep("auth");
+        setStep("auth")
       }
-      setLoading(false); // Firebase has responded, stop the spinner
-    });
-    return () => unsub();
-  }, []);
+      setLoading(false)
+    })
+    return () => unsub()
+  }, [])
 
   const handleSignOut = async () => {
-    const { signOut } = await import("firebase/auth");
-    await signOut(auth);
-    setStep("auth");
-  };
+    const { signOut } = await import("firebase/auth")
+    await signOut(auth)
+    setStep("auth")
+  }
 
-  // Show a loading screen while Firebase checks the session
   if (loading) {
     return (
-      <div style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "var(--parchment, #f5f0e8)",
-        gap: "16px",
-      }}>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "var(--parchment, #f5f0e8)",
+          gap: "16px",
+        }}
+      >
         <AiMark size={48} />
         <div style={{ font: "700 18px var(--display, sans-serif)", color: "var(--ink, #1d1d1d)" }}>
           Checking your session…
         </div>
       </div>
-    );
+    )
   }
 
-  if (step === "auth") return <Auth next={() => setStep("dashboard")} />;
-  if (step === "plans") return <Plans next={() => setStep("profile")} back={() => setStep("auth")} />;
-  if (step === "profile") return <Profile next={() => setStep("dashboard")} back={() => setStep("plans")} />;
-  if (step === "dashboard") return <Dashboard restart={() => setStep("auth")} step={step} setStep={setStep} />;
-  if (step === "sensor") return <IoTTelemetry restart={() => setStep("dashboard")} />;
-  if (step === "scanner") return <AIScannerPage step={step} setStep={setStep} />;
-  if (step === "analytics") return <AnalyticsPage step={step} setStep={setStep} />;
-  if (step === "history") return <MealHistoryPage step={step} setStep={setStep} />;
-  if (step === "settings") return <SettingsPage step={step} setStep={setStep} onSignOut={handleSignOut} />;
-  return null;
+  if (step === "auth") return <Auth next={() => setStep("dashboard")} />
+  if (step === "plans") return <Plans next={() => setStep("profile")} back={() => setStep("auth")} />
+  if (step === "profile") return <Profile next={() => setStep("dashboard")} back={() => setStep("plans")} />
+
+  return (
+    <Dashboard
+      restart={() => setStep("auth")}
+      step={step}
+      setStep={setStep}
+      onSignOut={handleSignOut}
+    />
+  )
 }
+
 
 
