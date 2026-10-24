@@ -1,6 +1,10 @@
-import { useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { signInWithEmail, signInWithGoogle, auth } from "./firebase"
+import { onAuthStateChanged } from "firebase/auth"
 
-type Step = "auth" | "plans" | "profile" | "dashboard"
+
+type Step = "auth" | "plans" | "profile" | "dashboard" | "sensor" | "scanner" | "analytics" | "history" | "settings"
+
 type IconName = "home" | "scan" | "sensor" | "chart" | "history" | "settings" | "plus" | "camera" | "upload" | "check" | "alert" | "leaf"
 
 const FOOD_IMAGE =
@@ -168,6 +172,31 @@ function FlowDots({ current }: { current: number }) {
 }
 
 function Auth({ next }: { next: () => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    try {
+      await signInWithEmail(email, password);
+      next();
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed');
+    }
+  };
+
+  const handleGoogle = async () => {
+    setError(null);
+    try {
+      await signInWithGoogle();
+      next();
+    } catch (err: any) {
+      setError(err.message || 'Google sign‑in failed');
+    }
+  };
+
   return (
     <div className="auth-page">
       <div className="auth-copy">
@@ -201,7 +230,7 @@ function Auth({ next }: { next: () => void }) {
           <p>Sign in or create your account to begin.</p>
         </div>
         <div className="sso-grid">
-          <Button kind="outline">
+          <Button kind="outline" onClick={handleGoogle}>
             <b className="google-g">G</b> Continue with Google
           </Button>
           <Button kind="outline">
@@ -213,18 +242,14 @@ function Auth({ next }: { next: () => void }) {
           or continue with email
           <span />
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            next()
-          }}
-        >
+        <form onSubmit={handleSubmit}>
           <label>
             Email address
             <input
               type="email"
               placeholder="you@example.com"
-              defaultValue="shrutika@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
           </label>
           <label>
@@ -232,9 +257,11 @@ function Auth({ next }: { next: () => void }) {
             <input
               type="password"
               placeholder="At least 8 characters"
-              defaultValue="nutrilens"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
             />
           </label>
+          {error && <p style={{ color: 'red' }}>{error}</p>}
           <div className="form-meta">
             <label className="check-label">
               <input type="checkbox" defaultChecked /> Keep me signed in
@@ -250,7 +277,7 @@ function Auth({ next }: { next: () => void }) {
         </small>
       </Card>
     </div>
-  )
+  );
 }
 
 const plans = [
@@ -514,7 +541,7 @@ function Profile({ next, back }: { next: () => void back: () => void }) {
   )
 }
 
-function Dashboard({ restart }: { restart: () => void }) {
+function Dashboard({ restart, step, setStep }: { restart: () => void; step: Step; setStep: (s: Step) => void }) {
   const [image, setImage] = useState(FOOD_IMAGE)
   const [scanning, setScanning] = useState(false)
   const fileChange = (file?: File) => {
@@ -528,16 +555,20 @@ function Dashboard({ restart }: { restart: () => void }) {
       <aside className="sidebar">
         <Brand light />
         <nav>
-          {[
-            ["home", "Dashboard"],
-            ["scan", "AI Scanner"],
-            ["sensor", "IoT Telemetry"],
-            ["chart", "Analytics"],
-            ["history", "Meal History"],
-            ["settings", "Settings"],
-          ].map(([icon, label], i) => (
-            <button className={i === 1 ? "active" : ""} key={label}>
-              <Icon name={icon as IconName} />
+          {([
+            ["home", "Dashboard", "dashboard"],
+            ["scan", "AI Scanner", "scanner"],
+            ["sensor", "IoT Telemetry", "sensor"],
+            ["chart", "Analytics", "analytics"],
+            ["history", "Meal History", "history"],
+            ["settings", "Settings", "settings"],
+          ] as [IconName, string, Step][]).map(([icon, label, target]) => (
+            <button
+              key={label}
+              className={step === target ? "active" : ""}
+              onClick={() => setStep(target)}
+            >
+              <Icon name={icon} />
               <span>{label}</span>
             </button>
           ))}
@@ -738,19 +769,110 @@ function Dashboard({ restart }: { restart: () => void }) {
   )
 }
 
-export default function App() {
-  const [step, setStep] = useState<Step>("auth")
-  if (step === "auth") return <Auth next={() => setStep("plans")} />
-  if (step === "plans")
-    return (
-      <Plans next={() => setStep("profile")} back={() => setStep("auth")} />
-    )
-  if (step === "profile")
-    return (
-      <Profile
-        next={() => setStep("dashboard")}
-        back={() => setStep("plans")}
-      />
-    )
-  return <Dashboard restart={() => setStep("auth")} />
+function IoTTelemetry({ restart }: { restart: () => void }) {
+  const readings = [
+    { label: "Temperature", value: "24°C", icon: "🌡️", status: "normal", bar: 60 },
+    { label: "Humidity", value: "68% RH", icon: "💧", status: "high", bar: 68 },
+    { label: "CO₂ Level", value: "412 ppm", icon: "🌿", status: "normal", bar: 41 },
+    { label: "Light Level", value: "280 lux", icon: "☀️", status: "normal", bar: 28 },
+  ]
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--parchment)", padding: "32px" }}>
+      <div style={{ maxWidth: "900px", margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "28px" }}>
+          <div>
+            <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--sage)", textTransform: "uppercase", letterSpacing: "1px" }}>Live Sensor Data</span>
+            <h1 style={{ font: "700 36px var(--display)", margin: "4px 0 0" }}>IoT Telemetry</h1>
+          </div>
+          <button onClick={restart} style={{ border: "2px solid var(--ink)", borderRadius: "99px", padding: "8px 18px", background: "transparent", fontWeight: 800, cursor: "pointer" }}>← Back to Dashboard</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
+          {readings.map((r) => (
+            <div key={r.label} style={{ background: "#fff", border: "2px solid var(--ink)", borderRadius: "16px", padding: "20px", boxShadow: "3px 3px 0 var(--ink)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                <span style={{ fontSize: "24px" }}>{r.icon}</span>
+                <span style={{ fontSize: "9px", fontWeight: 800, padding: "4px 8px", borderRadius: "99px", background: r.status === "high" ? "#fef3c7" : "#dcfce7", color: r.status === "high" ? "#92400e" : "#166534" }}>
+                  {r.status === "high" ? "⚠ High" : "✓ Normal"}
+                </span>
+              </div>
+              <div style={{ font: "700 28px var(--display)", marginBottom: "4px" }}>{r.value}</div>
+              <div style={{ fontSize: "10px", color: "var(--muted)", fontWeight: 800, marginBottom: "10px" }}>{r.label}</div>
+              <div style={{ height: "6px", background: "rgba(0,0,0,0.08)", borderRadius: "99px" }}>
+                <div style={{ height: "100%", width: `${r.bar}%`, borderRadius: "99px", background: r.status === "high" ? "#f59e0b" : "var(--sage)" }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ background: "#fff", border: "2px solid var(--ink)", borderRadius: "16px", padding: "20px", boxShadow: "3px 3px 0 var(--ink)" }}>
+          <h2 style={{ font: "700 18px var(--display)", marginBottom: "12px" }}>Pantry Alert</h2>
+          <div style={{ background: "#fef3c7", border: "1.5px solid #f59e0b", borderRadius: "10px", padding: "14px", display: "flex", gap: "12px", alignItems: "center" }}>
+            <span style={{ fontSize: "28px" }}>⚠️</span>
+            <div>
+              <strong style={{ display: "block", fontFamily: "var(--display)", fontSize: "14px" }}>High moisture detected in pantry</strong>
+              <p style={{ fontSize: "11px", color: "#78350f", margin: "4px 0 0" }}>Humidity at 68% RH — consume baked goods soon to prevent mold.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
+
+
+export default function App() {
+  const [step, setStep] = useState<Step>("auth");
+  const [loading, setLoading] = useState(true); // wait for Firebase to resolve auth
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // Already signed in — go to dashboard
+        setStep("dashboard");
+      } else {
+        // No active session — must log in
+        setStep("auth");
+      }
+      setLoading(false); // Firebase has responded, stop the spinner
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSignOut = async () => {
+    const { signOut } = await import("firebase/auth");
+    await signOut(auth);
+    setStep("auth");
+  };
+
+  // Show a loading screen while Firebase checks the session
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "var(--parchment, #f5f0e8)",
+        gap: "16px",
+      }}>
+        <AiMark size={48} />
+        <div style={{ font: "700 18px var(--display, sans-serif)", color: "var(--ink, #1d1d1d)" }}>
+          Checking your session…
+        </div>
+      </div>
+    );
+  }
+
+  if (step === "auth") return <Auth next={() => setStep("dashboard")} />;
+  if (step === "plans") return <Plans next={() => setStep("profile")} back={() => setStep("auth")} />;
+  if (step === "profile") return <Profile next={() => setStep("dashboard")} back={() => setStep("plans")} />;
+  if (step === "dashboard") return <Dashboard restart={() => setStep("auth")} step={step} setStep={setStep} />;
+  if (step === "sensor") return <IoTTelemetry restart={() => setStep("dashboard")} />;
+  if (step === "scanner") return <AIScannerPage step={step} setStep={setStep} />;
+  if (step === "analytics") return <AnalyticsPage step={step} setStep={setStep} />;
+  if (step === "history") return <MealHistoryPage step={step} setStep={setStep} />;
+  if (step === "settings") return <SettingsPage step={step} setStep={setStep} onSignOut={handleSignOut} />;
+  return null;
+}
+
+
