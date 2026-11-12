@@ -127,6 +127,20 @@ test("analyze reports Gemini credential and model configuration failures clearly
   assert.doesNotMatch(res.body.error, /provider error details/);
 });
 
+test("analyze surfaces safe provider details for other Gemini failures", async () => {
+  globalThis.fetch = async (input) => {
+    if (String(input).includes("identitytoolkit.googleapis.com")) return response({ users: [{ localId: "user-1" }] });
+    return response({ error: { message: "Invalid request: unsupported image content" } }, 400);
+  };
+  const res = mockResponse();
+  await analyzeHandler(request({ mimeType: "image/png", imageBase64: png }), res);
+  assert.equal(res.statusCode, 502);
+  assert.equal(
+    res.body.error,
+    "Gemini request failed (HTTP 400): Invalid request: unsupported image content",
+  );
+});
+
 test("analyze reports USDA credential failures instead of returning empty nutrition", async () => {
   globalThis.fetch = async (input) => {
     const url = String(input);

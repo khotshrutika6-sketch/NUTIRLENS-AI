@@ -147,12 +147,25 @@ Identify each distinct food on the plate, including Indian dishes and visible si
         { status: 503 },
       );
     }
-    console.error("Gemini request failed with HTTP", response.status);
+    let providerMessage = "";
+    try {
+      const providerError = await response.json();
+      if (typeof providerError?.error?.message === "string") {
+        providerMessage = providerError.error.message
+          .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted]")
+          .slice(0, 400);
+      }
+    } catch {
+      // Some provider failures return an empty or non-JSON response.
+    }
+    console.error("Gemini request failed with HTTP", response.status, providerMessage || "(no provider message)");
     throw Object.assign(
       new Error(
-        response.status === 429
-          ? "Gemini is busy. Please wait a moment and try again."
-          : "Gemini is temporarily unavailable. Please try again shortly.",
+        providerMessage
+          ? `Gemini request failed (HTTP ${response.status}): ${providerMessage}`
+          : response.status === 429
+            ? "Gemini is busy. Please wait a moment and try again."
+            : `Gemini is temporarily unavailable (HTTP ${response.status}). Please try again shortly.`,
       ),
       { status: response.status === 429 ? 429 : 502 },
     );
