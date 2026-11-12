@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { signInWithEmail, signInWithGoogle, auth } from "./firebase"
-import { onAuthStateChanged } from "firebase/auth"
+import { signInWithEmail, signUpWithEmail, signInWithGoogle, auth } from "./firebase"
+import { onAuthStateChanged, signOut } from "firebase/auth"
+import FoodScanner from "./FoodScanner"
 import {
   analyzeMealWithGemini,
-  DEFAULT_GEMINI_KEY,
   type MealAnalysis,
 } from "./gemini"
 
@@ -136,14 +136,22 @@ function Button({
   kind = "primary",
   onClick,
   type = "button",
+  disabled = false,
 }: {
   children: ReactNode
-  kind?: "primary" | "outline" | "light"
+  kind?: "primary" | "outline" | "light" | "dark"
   onClick?: () => void
   type?: "button" | "submit"
+  disabled?: boolean
 }) {
   return (
-    <button type={type} className={`button button--${kind}`} onClick={onClick}>
+    <button
+      type={type}
+      className={`button button--${kind}`}
+      onClick={onClick}
+      disabled={disabled}
+      style={disabled ? { opacity: 0.7, cursor: "not-allowed" } : undefined}
+    >
       {children}
     </button>
   )
@@ -178,28 +186,91 @@ function FlowDots({ current }: { current: number }) {
 }
 
 function Auth({ next }: { next: () => void }) {
+  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const getFriendlyAuthError = (err: any): string => {
+    const code = err?.code || '';
+    switch (code) {
+      case 'auth/invalid-email':
+        return 'Please enter a valid email address (e.g. name@example.com). Check for extra spaces.';
+      case 'auth/user-not-found':
+        return 'No account exists with this email. Switch to "Sign Up" to create an account.';
+      case 'auth/wrong-password':
+        return 'Incorrect password. Please verify and try again.';
+      case 'auth/invalid-credential':
+        return 'Invalid email or password. If you don\'t have an account yet, switch to "Sign Up".';
+      case 'auth/email-already-in-use':
+        return 'An account already exists with this email. Switch to "Log In" instead.';
+      case 'auth/weak-password':
+        return 'Password is too weak. Please use at least 6 characters.';
+      case 'auth/popup-closed-by-user':
+        return 'Sign-in popup closed before finishing.';
+      case 'auth/network-request-failed':
+        return 'Network error. Please check your internet connection.';
+      case 'auth/too-many-requests':
+        return 'Too many failed attempts. Please wait a moment and try again.';
+      default:
+        return err?.message?.replace(/^Firebase:\s*/, '') || 'Authentication failed. Please check your details.';
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    // Sanitize and trim email to prevent auth/invalid-email error
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setError('Please enter your email address.');
+      return;
+    }
+
+    // Basic email format check
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      setError('Please enter a valid email format (e.g. name@example.com).');
+      return;
+    }
+
+    if (!password) {
+      setError('Please enter your password.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setLoading(true);
     try {
-      await signInWithEmail(email, password);
+      if (isSignUp) {
+        await signUpWithEmail(cleanEmail, password);
+      } else {
+        await signInWithEmail(cleanEmail, password);
+      }
       next();
     } catch (err: any) {
-      setError(err.message || 'Authentication failed');
+      setError(getFriendlyAuthError(err));
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleGoogle = async () => {
     setError(null);
+    setLoading(true);
     try {
       await signInWithGoogle();
       next();
     } catch (err: any) {
-      setError(err.message || 'Google sign‑in failed');
+      setError(getFriendlyAuthError(err));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -233,13 +304,62 @@ function Auth({ next }: { next: () => void }) {
             <AiMark size={34} />
           </span>
           <h2>Welcome to NutriLens</h2>
-          <p>Sign in or create your account to begin.</p>
+          <p>{isSignUp ? "Create your new account to begin." : "Sign in to your account to continue."}</p>
         </div>
+
+        {/* Tab switch between Log In and Sign Up */}
+        <div style={{
+          display: 'flex',
+          gap: '6px',
+          marginBottom: '16px',
+          background: 'rgba(0, 0, 0, 0.04)',
+          padding: '4px',
+          borderRadius: '12px',
+          border: '1.5px solid var(--ink)'
+        }}>
+          <button
+            type="button"
+            onClick={() => { setIsSignUp(false); setError(null); }}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: 800,
+              fontSize: '12px',
+              cursor: 'pointer',
+              background: !isSignUp ? 'var(--mint)' : 'transparent',
+              color: 'var(--ink)',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            Log In
+          </button>
+          <button
+            type="button"
+            onClick={() => { setIsSignUp(true); setError(null); }}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: 800,
+              fontSize: '12px',
+              cursor: 'pointer',
+              background: isSignUp ? 'var(--mint)' : 'transparent',
+              color: 'var(--ink)',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            Create Account
+          </button>
+        </div>
+
         <div className="sso-grid">
-          <Button kind="outline" onClick={handleGoogle}>
+          <Button kind="outline" onClick={handleGoogle} disabled={loading}>
             <b className="google-g">G</b> Continue with Google
           </Button>
-          <Button kind="outline">
+          <Button kind="outline" disabled={loading}>
             <b>●</b> Continue with Apple
           </Button>
         </div>
@@ -255,27 +375,51 @@ function Auth({ next }: { next: () => void }) {
               type="email"
               placeholder="you@example.com"
               value={email}
+              autoComplete="email"
               onChange={(e) => setEmail(e.target.value)}
+              onBlur={() => setEmail((prev) => prev.trim())}
+              required
             />
           </label>
           <label>
             Password
             <input
               type="password"
-              placeholder="At least 8 characters"
+              placeholder="At least 6 characters"
               value={password}
+              autoComplete={isSignUp ? "new-password" : "current-password"}
               onChange={(e) => setPassword(e.target.value)}
+              required
             />
           </label>
-          {error && <p style={{ color: 'red' }}>{error}</p>}
+          {error && (
+            <div
+              style={{
+                background: '#fef2f2',
+                border: '1.5px solid #ef4444',
+                color: '#991b1b',
+                padding: '9px 12px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: 700,
+                lineHeight: 1.4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <span style={{ fontSize: '14px' }}>⚠️</span>
+              <span>{error}</span>
+            </div>
+          )}
           <div className="form-meta">
             <label className="check-label">
               <input type="checkbox" defaultChecked /> Keep me signed in
             </label>
-            <button type="button">Forgot password?</button>
+            <button type="button" onClick={() => setError("Password reset link will be sent to your email.")}>Forgot password?</button>
           </div>
-          <Button type="submit">
-            Log In / Sign Up <span>→</span>
+          <Button type="submit" disabled={loading}>
+            {loading ? "Processing..." : isSignUp ? "Create Account" : "Log In"} <span>→</span>
           </Button>
         </form>
         <small className="legal">
@@ -286,114 +430,421 @@ function Auth({ next }: { next: () => void }) {
   );
 }
 
-const plans = [
+interface PlanTier {
+  id: "basic" | "pro" | "business"
+  cardLabel: string
+  name: string
+  badge?: string
+  badgeType?: "popular" | "business"
+  priceMonthly: string
+  priceYearly: string
+  yearlyNote?: string
+  note: string
+  features: string[]
+  actionMonthly: string
+  actionYearly: string
+  btnKind: "outline" | "primary" | "dark"
+  featured?: boolean
+}
+
+const IN_PLANS: PlanTier[] = [
   {
-    name: "Free Lens",
-    price: "$0",
-    note: "Start your food journal",
+    id: "basic",
+    cardLabel: "Basic Lens — ₹0/month",
+    name: "Basic Lens",
+    priceMonthly: "₹0",
+    priceYearly: "₹0",
+    note: "Essential calorie & meal journal for everyday mindful eating",
     features: [
-      "5 AI scans per day",
-      "Basic calorie logging",
-      "7-day meal history",
+      "5 AI meal scans per day",
+      "Basic calorie & macronutrient estimation (Carbs, Protein, Fats)",
+      "7-day meal log history",
+      "Standard food freshness indicator",
     ],
-    action: "Start free",
+    actionMonthly: "Continue with Free",
+    actionYearly: "Continue with Free",
+    btnKind: "outline",
+    featured: false,
   },
   {
-    name: "Pro Lens",
-    price: "$9.99",
-    note: "Your complete food intelligence toolkit",
+    id: "pro",
+    cardLabel: "NutriLens Pro — ₹149/month",
+    name: "NutriLens Pro",
+    badge: "★ Most Popular",
+    badgeType: "popular",
+    priceMonthly: "₹149",
+    priceYearly: "₹99",
+    yearlyNote: "₹99/month billed annually (Save 33%)",
+    note: "Unlimited Gemini AI intelligence, micronutrients & IoT telemetry",
     features: [
-      "Unlimited Gemini AI scans",
-      "Macro & micronutrient breakdown",
-      "Visual freshness detection",
-      "30-day IoT history",
+      "Unlimited Google Gemini AI meal vision scans",
+      "Detailed micronutrient & mineral breakdown (Sodium, Potassium, Iron, Calcium, Vitamins)",
+      "Advanced visual freshness & spoilage detection (\"Looks Fresh\", \"Needs Attention\", \"Visible Spoilage\")",
+      "Advanced junk food analytics & dietary ratio charts",
+      "30-day IoT storage sensor history & temperature/humidity alerts",
+      "PDF/CSV monthly health report export",
     ],
-    action: "Subscribe & Continue",
+    actionMonthly: "Upgrade to Pro (₹149/mo)",
+    actionYearly: "Upgrade to Pro (₹99/mo)",
+    btnKind: "primary",
     featured: true,
   },
   {
-    name: "Family + Hardware",
-    price: "$19.99",
-    note: "A connected pantry for everyone",
+    id: "business",
+    cardLabel: "NutriLens Business — ₹1,499/month",
+    name: "NutriLens Business",
+    badge: "Best for Cafés, Gyms & Cloud Kitchens",
+    badgeType: "business",
+    priceMonthly: "₹1,499",
+    priceYearly: "₹1,199",
+    yearlyNote: "or ₹499/menu/month add-on",
+    note: "Commercial food intelligence & multi-sensor telemetry for enterprises",
     features: [
-      "Everything in Pro",
-      "Pre-configured ESP32 + DHT22",
-      "Sensor kit shipped to your door",
-      "Up to 5 family profiles",
+      "Everything in Pro Tier",
+      "QR-code digital menus with automated AI nutrition facts & allergen tags",
+      "Professional dietitian client tracking dashboard (up to 50 clients)",
+      "Multi-node ESP32 IoT food storage monitoring for commercial pantries & fridges",
     ],
-    action: "Choose bundle",
+    actionMonthly: "Get Business Plan",
+    actionYearly: "Get Business Plan",
+    btnKind: "dark",
+    featured: false,
   },
 ]
 
-function Plans({ next, back }: { next: () => void; back: () => void }) {
-  const [yearly, setYearly] = useState(true)
+function B2BCalculatorModal({
+  onClose,
+  onSelectBusiness,
+}: {
+  onClose: () => void
+  onSelectBusiness: () => void
+}) {
+  const [menus, setMenus] = useState(3)
+  const [clients, setClients] = useState(35)
+
+  const additionalMenuCost = Math.max(0, menus - 1) * 499
+  const additionalClientCost = Math.max(0, Math.ceil((clients - 50) / 25)) * 499
+  const totalMonthlyCost = 1499 + additionalMenuCost + additionalClientCost
+
+  const monthlyFoodWasteSaved = menus * 4800
+  const adminHoursSaved = Math.round(clients * 0.8)
+
+  return (
+    <div className="api-modal-backdrop" onClick={onClose} style={{ zIndex: 10000 }}>
+      <div
+        className="api-modal"
+        style={{ maxWidth: "680px", maxHeight: "90vh", overflowY: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
+          <div>
+            <span className="eyebrow" style={{ color: "var(--olive)" }}>B2B & Commercial Partnerships</span>
+            <h2 style={{ font: "700 24px var(--display)", margin: "4px 0" }}>Revenue & ROI Calculator (INR ₹)</h2>
+            <p style={{ fontSize: "11px", color: "var(--muted)", margin: 0 }}>
+              Tailored for Healthy Cafés, Fitness Gyms, Cloud Kitchens & Dietitians across India.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              border: "1.5px solid var(--ink)",
+              background: "#fff",
+              borderRadius: "50%",
+              width: "28px",
+              height: "28px",
+              cursor: "pointer",
+              fontWeight: 800,
+              fontSize: "14px",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Interactive Sliders */}
+        <div style={{ background: "var(--mint)", border: "2px solid var(--ink)", borderRadius: "14px", padding: "16px", marginBottom: "18px" }}>
+          <div style={{ marginBottom: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: "12px", marginBottom: "6px" }}>
+              <span>Digital AI QR Menus / Kitchen Outlets</span>
+              <strong style={{ font: "700 16px var(--display)", color: "var(--sage-dark)" }}>{menus} Locations</strong>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={15}
+              value={menus}
+              onChange={(e) => setMenus(Number(e.target.value))}
+              style={{ width: "100%", accentColor: "var(--sage)", height: "8px" }}
+            />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "9px", color: "var(--muted)" }}>
+              <span>1 Outlet (Base)</span>
+              <span>15 Outlets (+₹499/outlet)</span>
+            </div>
+          </div>
+
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: "12px", marginBottom: "6px" }}>
+              <span>Dietitian Roster / Client Capacity</span>
+              <strong style={{ font: "700 16px var(--display)", color: "var(--sage-dark)" }}>{clients} Active Clients</strong>
+            </div>
+            <input
+              type="range"
+              min={10}
+              max={150}
+              step={5}
+              value={clients}
+              onChange={(e) => setClients(Number(e.target.value))}
+              style={{ width: "100%", accentColor: "var(--sage)", height: "8px" }}
+            />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "9px", color: "var(--muted)" }}>
+              <span>10 Clients</span>
+              <span>150 Clients</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Dynamic ROI Metrics */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", marginBottom: "20px" }}>
+          <div style={{ border: "1.5px solid var(--ink)", background: "#fff", borderRadius: "11px", padding: "12px", textAlign: "center" }}>
+            <span style={{ fontSize: "8px", textTransform: "uppercase", fontWeight: 800, color: "var(--muted)", display: "block" }}>
+              Total Investment
+            </span>
+            <strong style={{ font: "700 22px var(--display)", color: "var(--coral)", display: "block" }}>
+              ₹{totalMonthlyCost.toLocaleString("en-IN")}
+            </strong>
+            <small style={{ fontSize: "8px", color: "var(--muted)" }}>per month (INR ₹)</small>
+          </div>
+
+          <div style={{ border: "1.5px solid var(--ink)", background: "#fff", borderRadius: "11px", padding: "12px", textAlign: "center" }}>
+            <span style={{ fontSize: "8px", textTransform: "uppercase", fontWeight: 800, color: "var(--muted)", display: "block" }}>
+              Est. Spoilage Savings
+            </span>
+            <strong style={{ font: "700 22px var(--display)", color: "var(--olive)", display: "block" }}>
+              ₹{monthlyFoodWasteSaved.toLocaleString("en-IN")}
+            </strong>
+            <small style={{ fontSize: "8px", color: "var(--muted)" }}>via ESP32 telemetry</small>
+          </div>
+
+          <div style={{ border: "1.5px solid var(--ink)", background: "#fff", borderRadius: "11px", padding: "12px", textAlign: "center" }}>
+            <span style={{ fontSize: "8px", textTransform: "uppercase", fontWeight: 800, color: "var(--muted)", display: "block" }}>
+              Dietitian Time Saved
+            </span>
+            <strong style={{ font: "700 22px var(--display)", color: "var(--sage)", display: "block" }}>
+              ~{adminHoursSaved} hrs
+            </strong>
+            <small style={{ fontSize: "8px", color: "var(--muted)" }}>in manual AI logging</small>
+          </div>
+        </div>
+
+        {/* 3 B2B Models Breakdown */}
+        <div style={{ display: "grid", gap: "10px", marginBottom: "20px" }}>
+          <div style={{ border: "1.5px dashed var(--line)", borderRadius: "10px", padding: "10px 14px", background: "rgba(0,0,0,0.02)" }}>
+            <strong style={{ fontSize: "11px", color: "var(--ink)", display: "block" }}>
+              🍱 Model A: Healthy Cafés & Cloud Kitchens
+            </strong>
+            <p style={{ fontSize: "10px", color: "var(--muted)", margin: "3px 0 0" }}>
+              Auto-generate dynamic QR-code menus with verified macros, calories, glycemic estimates, and FSSAI allergen tags. Boosts customer order value by ~23%.
+            </p>
+          </div>
+
+          <div style={{ border: "1.5px dashed var(--line)", borderRadius: "10px", padding: "10px 14px", background: "rgba(0,0,0,0.02)" }}>
+            <strong style={{ fontSize: "11px", color: "var(--ink)", display: "block" }}>
+              🏋️ Model B: Fitness Centers & Private Nutritionists
+            </strong>
+            <p style={{ fontSize: "10px", color: "var(--muted)", margin: "3px 0 0" }}>
+              Client management dashboard. Review clients' meal scans, track macronutrient deficits, and export monthly health reports to WhatsApp or PDF in 1 click.
+            </p>
+          </div>
+
+          <div style={{ border: "1.5px dashed var(--line)", borderRadius: "10px", padding: "10px 14px", background: "rgba(0,0,0,0.02)" }}>
+            <strong style={{ fontSize: "11px", color: "var(--ink)", display: "block" }}>
+              📡 Model C: Commercial Cold-Chain & Pantry Telemetry
+            </strong>
+            <p style={{ fontSize: "10px", color: "var(--muted)", margin: "3px 0 0" }}>
+              Multi-node ESP32 sensors deployed across restaurant refrigerators & dry pantries. Immediate SMS/Telegram alert when temperature or humidity exceeds safe thresholds.
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+          <Button kind="outline" onClick={onClose}>
+            Back to Plans
+          </Button>
+          <Button kind="dark" onClick={() => { onSelectBusiness(); onClose(); }}>
+            Choose Business Plan (₹1,499/mo)
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Plans({
+  next,
+  toDashboard,
+  back,
+  userPlan = "pro",
+  setUserPlan,
+}: {
+  next: () => void
+  toDashboard?: () => void
+  back: () => void
+  userPlan?: "basic" | "pro" | "business"
+  setUserPlan?: (p: "basic" | "pro" | "business") => void
+}) {
+  const [yearly, setYearly] = useState(false)
+  const [showB2BModal, setShowB2BModal] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+
+  const handleSelectPlan = (plan: PlanTier) => {
+    if (setUserPlan) {
+      setUserPlan(plan.id)
+    }
+    localStorage.setItem("nutrilens_plan", plan.id)
+    localStorage.setItem("nutrilens_has_seen_plans", "true")
+    setToast(`Activated ${plan.name} (${yearly ? plan.priceYearly : plan.priceMonthly}/month)!`)
+    setTimeout(() => {
+      next()
+    }, 400)
+  }
+
   return (
     <div className="flow-page">
       <FlowHeader step={2} back={back} />
       <div className="flow-title">
         <span className="eyebrow">Choose your path</span>
-        <h1>Choose Your NutriLens Plan</h1>
+        <h1>Choose Your NutriLens AI Plan (INR ₹)</h1>
         <p>
-          Start simple or unlock the full intelligence of your food and pantry.
+          Start free or unlock advanced Gemini AI vision, micronutrient tracking, and IoT storage monitoring.
         </p>
       </div>
+
+      {toast && (
+        <div style={{
+          maxWidth: "420px",
+          margin: "0 auto 16px",
+          background: "var(--mint)",
+          border: "2px solid var(--ink)",
+          borderRadius: "10px",
+          padding: "8px 16px",
+          textAlign: "center",
+          fontWeight: 800,
+          fontSize: "12px",
+          color: "var(--sage-dark)"
+        }}>
+          ✓ {toast}
+        </div>
+      )}
+
+      {/* 1. Page Header & Billing Toggle */}
       <div className="billing">
         <button
           className={!yearly ? "active" : ""}
           onClick={() => setYearly(false)}
         >
-          Monthly
+          Monthly Billing
         </button>
         <button
           className={yearly ? "active" : ""}
           onClick={() => setYearly(true)}
         >
-          Yearly <span>Save 20% + Free IoT Kit</span>
+          Yearly Billing <span>Save 20% + Free IoT Sensor Kit</span>
         </button>
       </div>
+
+      {/* 2. 3-Tier Pricing Cards Layout (INR ₹) */}
       <div className="plan-grid">
-        {plans.map((plan) => (
-          <Card
-            key={plan.name}
-            mint={plan.featured}
-            className={`plan ${plan.featured ? "plan--featured" : ""}`}
-          >
-            {plan.featured && <div className="popular">★ Most Popular</div>}
-            <h2>{plan.name}</h2>
-            <p>{plan.note}</p>
-            <div className="price">
-              <strong>
-                {yearly && plan.price !== "$0"
-                  ? plan.name === "Pro Lens"
-                    ? "$7.99"
-                    : "$15.99"
-                  : plan.price}
-              </strong>
-              <span>/ month</span>
-            </div>
-            <div className="dash" />
-            <ul>
-              {plan.features.map((f) => (
-                <li key={f}>
-                  <i>
-                    <Icon name="check" size={14} />
-                  </i>
-                  {f}
-                </li>
-              ))}
-            </ul>
-            <Button
-              kind={plan.featured ? "primary" : "outline"}
-              onClick={plan.featured ? next : undefined}
+        {IN_PLANS.map((plan) => {
+          const isCurrentActive = userPlan === plan.id
+          return (
+            <Card
+              key={plan.id}
+              mint={plan.featured}
+              className={`plan ${plan.featured ? "plan--featured" : ""}`}
             >
-              {plan.action}
-            </Button>
-          </Card>
-        ))}
+              {plan.badgeType === "popular" && (
+                <div className="popular">{plan.badge}</div>
+              )}
+              {plan.badgeType === "business" && (
+                <div className="business-badge">
+                  <span>🏢</span> {plan.badge}
+                </div>
+              )}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h2>{plan.name}</h2>
+                {isCurrentActive && (
+                  <span className="plan-active-chip">Active</span>
+                )}
+              </div>
+              <p>{plan.note}</p>
+              <div className="price">
+                <strong>{yearly ? plan.priceYearly : plan.priceMonthly}</strong>
+                <span>/ month</span>
+              </div>
+              {yearly && plan.yearlyNote && (
+                <div style={{ fontSize: "9px", color: "var(--olive)", fontWeight: 700, marginTop: "-6px", marginBottom: "8px" }}>
+                  {plan.yearlyNote}
+                </div>
+              )}
+              <div className="dash" />
+              <ul>
+                {plan.features.map((f) => (
+                  <li key={f}>
+                    <i>
+                      <Icon name="check" size={14} />
+                    </i>
+                    <span>{f}</span>
+                  </li>
+                ))}
+              </ul>
+              <Button
+                kind={plan.btnKind}
+                onClick={() => handleSelectPlan(plan)}
+              >
+                {yearly ? plan.actionYearly : plan.actionMonthly}
+              </Button>
+            </Card>
+          )
+        })}
       </div>
-      <button className="skip" onClick={next}>
-        Decide later and continue with Free Lens →
-      </button>
+
+      {/* 3. Footer & Revenue Transparency Note */}
+      <div className="pricing-footer-note">
+        <p>
+          🔒 All payments processed securely via UPI, Razorpay, Credit/Debit Cards, and Net Banking.
+        </p>
+        <div className="pay-grid">
+          <span className="pay-pill">⚡ UPI (GPay / PhonePe / Paytm)</span>
+          <span className="pay-pill">🛡️ Razorpay Verified</span>
+          <span className="pay-pill">💳 RuPay & Cards</span>
+          <span className="pay-pill">🏦 Net Banking (50+ Banks)</span>
+          <span className="pay-pill">🧾 GST Invoicing Available</span>
+        </div>
+        <div style={{ marginTop: "12px" }}>
+          <button
+            type="button"
+            className="b2b-link"
+            onClick={() => setShowB2BModal(true)}
+          >
+            📊 View B2B Partnership Models & Revenue Calculator →
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "center", gap: "20px", marginTop: "18px" }}>
+        <button className="skip" onClick={toDashboard || next}>
+          Skip setup and jump straight to Main Dashboard →
+        </button>
+      </div>
+
+      {showB2BModal && (
+        <B2BCalculatorModal
+          onClose={() => setShowB2BModal(false)}
+          onSelectBusiness={() => {
+            handleSelectPlan(IN_PLANS[2])
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -668,16 +1119,20 @@ interface MealLogItem {
   time: string
 }
 
-function Dashboard({
+function LegacyDashboard({
   restart,
   step,
   setStep,
   onSignOut,
+  userPlan = "pro",
+  setUserPlan,
 }: {
   restart: () => void
   step: Step
   setStep: (s: Step) => void
   onSignOut?: () => void
+  userPlan?: "basic" | "pro" | "business"
+  setUserPlan?: (p: "basic" | "pro" | "business") => void
 }) {
   const [image, setImage] = useState(PRESET_MEALS[0].img)
   const [analysis, setAnalysis] = useState<MealAnalysis>(PRESET_MEALS[0].analysis)
@@ -686,9 +1141,7 @@ function Dashboard({
   const [scanStatus, setScanStatus] = useState("Gemini AI is analyzing your meal…")
   const [scanError, setScanError] = useState<string | null>(null)
   const [showKeyModal, setShowKeyModal] = useState(false)
-  const [apiKey, setApiKey] = useState(() => {
-    return localStorage.getItem("NUTRILENS_GEMINI_KEY") || DEFAULT_GEMINI_KEY
-  })
+  const [apiKey] = useState("")
   const [keyInput, setKeyInput] = useState(apiKey)
   const [testResult, setTestResult] = useState<string | null>(null)
 
@@ -728,11 +1181,8 @@ function Dashboard({
   }, [mealLogs])
 
   const handleSaveApiKey = () => {
-    const trimmed = keyInput.trim()
-    if (!trimmed) return
-    localStorage.setItem("NUTRILENS_GEMINI_KEY", trimmed)
-    setApiKey(trimmed)
-    setTestResult("API Key saved successfully!")
+    setKeyInput("")
+    setTestResult("Configure GEMINI_API_KEY in the backend environment.")
     setTimeout(() => {
       setTestResult(null)
       setShowKeyModal(false)
@@ -898,11 +1348,22 @@ function Dashboard({
               <span>Gemini 2.5 Flash</span>
               <i />
             </button>
-            <div className="profile">
+            <div
+              className="profile"
+              style={{ cursor: "pointer" }}
+              onClick={() => setStep("plans")}
+              title="Click to view or change your INR (₹) subscription plan"
+            >
               <span>SK</span>
               <div>
                 <strong>Shrutika Khot</strong>
-                <small>Pro Member</small>
+                <small>
+                  {userPlan === "pro"
+                    ? "Pro (₹149/mo)"
+                    : userPlan === "business"
+                    ? "Business (₹1,499/mo)"
+                    : "Basic Member (₹0)"}
+                </small>
               </div>
             </div>
             {onSignOut && (
@@ -1151,6 +1612,103 @@ function Dashboard({
                 ))}
               </div>
             </Card>
+          </main>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Dashboard({
+  restart,
+  step,
+  setStep,
+  onSignOut,
+}: {
+  restart: () => void
+  step: Step
+  setStep: (s: Step) => void
+  onSignOut?: () => void
+  userPlan?: "basic" | "pro" | "business"
+  setUserPlan?: (p: "basic" | "pro" | "business") => void
+}) {
+  const user = auth.currentUser
+  const displayName = user?.displayName || user?.email?.split("@")[0] || "Your account"
+  const isScannerPage = step === "dashboard" || step === "scanner"
+  const scannerView = step === "history" ? "history" : step === "analytics" ? "analytics" : "scanner"
+
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <Brand light />
+        <nav>
+          {([
+            ["home", "Dashboard", "dashboard"],
+            ["scan", "AI Scanner", "scanner"],
+            ["sensor", "IoT Telemetry", "sensor"],
+            ["chart", "Analytics", "analytics"],
+            ["history", "Meal History", "history"],
+            ["settings", "Settings", "settings"],
+          ] as [IconName, string, Step][]).map(([icon, label, target]) => (
+            <button
+              key={label}
+              className={step === target || (target === "scanner" && step === "dashboard") ? "active" : ""}
+              onClick={() => setStep(target)}
+            >
+              <Icon name={icon} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-tip">
+          <Icon name="leaf" />
+          <strong>Mindful starts here.</strong>
+          <p>Save your meals to build a personal nutrition journal.</p>
+        </div>
+      </aside>
+
+      <div className="app-main">
+        <header className="topbar">
+          <div className="top-pills">
+            <button className={isScannerPage ? "active" : ""} onClick={() => setStep("scanner")}>Scanner</button>
+            <button className={step === "sensor" ? "active" : ""} onClick={() => setStep("sensor")}>IoT Monitor</button>
+            <button className={step === "analytics" ? "active" : ""} onClick={() => setStep("analytics")}>Daily summary</button>
+          </div>
+          <div className="top-actions">
+            <span className="scanner-model-pill"><span /> Gemini Vision · USDA nutrition</span>
+            <button className="profile" onClick={() => setStep("plans")} title="View subscription plan">
+              <span>{displayName.slice(0, 1).toUpperCase()}</span>
+              <strong>{displayName}</strong>
+            </button>
+            {onSignOut && <button className="scanner-signout" onClick={onSignOut}>Sign out</button>}
+          </div>
+        </header>
+
+        {isScannerPage || step === "history" || step === "analytics" ? (
+          <main className="dashboard scanner-shell-main">
+            <FoodScanner
+              view={scannerView}
+              onViewChange={(view) => setStep(view)}
+            />
+          </main>
+        ) : step === "sensor" ? (
+          <IoTTelemetry restart={() => setStep("scanner")} />
+        ) : (
+          <main className="scanner-page scanner-settings">
+            <div className="scanner-page-title">
+              <div>
+                <span className="scanner-eyebrow">Account</span>
+                <h1>Settings</h1>
+                <p>Manage your NutriLens session and saved meal data.</p>
+              </div>
+              <button className="scanner-secondary-button" onClick={() => setStep("scanner")}>Back to scanner</button>
+            </div>
+            <section className="scanner-card scanner-account-card">
+              <span className="scanner-step-tag">Firebase authenticated account</span>
+              <h2>{displayName}</h2>
+              <p>{user?.email || "Signed in with your NutriLens account"}</p>
+              {onSignOut && <button className="scanner-delete-button" onClick={onSignOut}>Sign out</button>}
+            </section>
           </main>
         )}
       </div>
@@ -1480,11 +2038,21 @@ function SettingsView({
 export default function App() {
   const [step, setStep] = useState<Step>("auth")
   const [loading, setLoading] = useState(true)
+  const [userPlan, setUserPlan] = useState<"basic" | "pro" | "business">(() => {
+    const saved = localStorage.getItem("nutrilens_plan") as "basic" | "pro" | "business" | null
+    return saved || "pro"
+  })
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user) {
-        setStep("dashboard")
+        // Direct new sessions right after authentication to subscription plans
+        const hasSeenPlans = localStorage.getItem("nutrilens_has_seen_plans")
+        if (!hasSeenPlans) {
+          setStep("plans")
+        } else {
+          setStep("dashboard")
+        }
       } else {
         setStep("auth")
       }
@@ -1494,7 +2062,6 @@ export default function App() {
   }, [])
 
   const handleSignOut = async () => {
-    const { signOut } = await import("firebase/auth")
     await signOut(auth)
     setStep("auth")
   }
@@ -1520,19 +2087,34 @@ export default function App() {
     )
   }
 
-  if (step === "auth") return <Auth next={() => setStep("dashboard")} />
-  if (step === "plans") return <Plans next={() => setStep("profile")} back={() => setStep("auth")} />
+  // 1. User Authenticates -> Directed straight to INR ₹ Subscription & Paywall
+  if (step === "auth") return <Auth next={() => setStep("plans")} />
+
+  // 2. Interactive INR ₹ Subscription & Paywall page
+  if (step === "plans") {
+    return (
+      <Plans
+        next={() => setStep("profile")}
+        toDashboard={() => setStep("dashboard")}
+        back={() => setStep("auth")}
+        userPlan={userPlan}
+        setUserPlan={setUserPlan}
+      />
+    )
+  }
+
+  // 3. User Health Profile setup (or direct to dashboard)
   if (step === "profile") return <Profile next={() => setStep("dashboard")} back={() => setStep("plans")} />
 
+  // 4. Main Dashboard & AI Vision Scanner
   return (
     <Dashboard
       restart={() => setStep("auth")}
       step={step}
       setStep={setStep}
       onSignOut={handleSignOut}
+      userPlan={userPlan}
+      setUserPlan={setUserPlan}
     />
   )
 }
-
-
-

@@ -1,10 +1,11 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported } from "firebase/analytics";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { getFirestore, collection, onSnapshot } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import type { Analytics } from "firebase/analytics";
+import { firebaseConfig } from "../shared/firebase-config.js";
 /*
 <script type="module">
   // Import the functions you need from the SDKs you need
@@ -32,16 +33,6 @@ import type { Analytics } from "firebase/analytics";
 */
 
 // Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyBHMTgIEvoERMDmL9C8WW7ananmi7EE4Fs",
-  authDomain: "nutrilens-5a81b.firebaseapp.com",
-  projectId: "nutrilens-5a81b",
-  storageBucket: "nutrilens-5a81b.firebasestorage.app",
-  messagingSenderId: "253329617311",
-  appId: "1:253329617311:web:340a7bbbb7be86d3704daa",
-  measurementId: "G-03J347X4ER",
-};
-
 // Initialize Firebase app
 const app = initializeApp(firebaseConfig);
 
@@ -53,7 +44,8 @@ export const storage = getStorage(app);
 // Export auth helpers
 export const googleProvider = new GoogleAuthProvider();
 export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
-export const signInWithEmail = (email: string, password: string) => signInWithEmailAndPassword(auth, email, password);
+export const signInWithEmail = (email: string, password: string) => signInWithEmailAndPassword(auth, email.trim(), password);
+export const signUpWithEmail = (email: string, password: string) => createUserWithEmailAndPassword(auth, email.trim(), password);
 
 // Analytics only works in browser environments (not SSR / Node)
 export let analytics: Analytics | null = null;
