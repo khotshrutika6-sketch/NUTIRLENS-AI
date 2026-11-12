@@ -1268,7 +1268,7 @@ function LegacyDashboard({
                 ● Active (50 models ready)
               </span>
               <span style={{ fontSize: "10px", color: "var(--muted)", marginLeft: "auto" }}>
-                Model: gemini-2.5-flash
+                Model: gemini-3.8-flash
               </span>
             </div>
             {testResult && (

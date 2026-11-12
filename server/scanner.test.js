@@ -54,6 +54,7 @@ test("analyze authenticates, identifies foods, and scales real database values b
     const url = String(input);
     if (url.includes("identitytoolkit.googleapis.com")) return response({ users: [{ localId: "user-1" }] });
     if (url.includes("generativelanguage.googleapis.com")) {
+      assert.match(url, /models\/gemini-3\.8-flash:generateContent/);
       const requestBody = JSON.parse(init.body);
       assert.equal(requestBody.generationConfig.responseMimeType, "application/json");
       return response({

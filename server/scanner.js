@@ -117,7 +117,7 @@ async function identifyFood(image) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw Object.assign(new Error("Gemini is not configured. Add GEMINI_API_KEY to the server environment."), { status: 503 });
 
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   const prompt = `Examine this food photograph. Return only JSON with this exact shape:
 {"mealName":"short meal title","items":[{"name":"specific visible food item","estimatedWeightG":150,"confidence":0.92,"visibleIngredients":["clearly visible ingredient"],"uncertainIngredients":["ingredient only if visible but uncertain"]}],"notes":"visual portion estimate caveat","freshness":{"label":"Looks Fresh|Needs Attention|Visible Spoilage Signs","observations":["only visible signs"],"uncertain":true}}
 Identify each distinct food on the plate, including Indian dishes and visible sides/garnishes. Give each item's total visible portion in grams and confidence between 0 and 1. Put confidently visible ingredients in visibleIngredients and uncertain visible ingredients in uncertainIngredients. Do not list hidden or inferred ingredients. Only create a separate item for a component when it has its own visible portion to estimate; avoid double counting ingredients. If no food is visible, return {"mealName":"","items":[],"notes":"No food detected","freshness":{"label":"Needs Attention","observations":[],"uncertain":true}}. Assess appearance only, never claim food is safe or unsafe. Do not return nutrition values, bounding boxes, or health advice.`;
@@ -142,7 +142,10 @@ Identify each distinct food on the plate, including Indian dishes and visible si
     }
     if (response.status === 404) {
       console.error("Gemini model was not found. Check GEMINI_MODEL.");
-      throw Object.assign(new Error(`Gemini model "${model}" is unavailable. Check GEMINI_MODEL in Vercel.`), { status: 503 });
+      throw Object.assign(
+        new Error(`Gemini model "${model}" was not found. Set GEMINI_MODEL to a supported model ID such as gemini-3.8-flash in Vercel.`),
+        { status: 503 },
+      );
     }
     console.error("Gemini request failed with HTTP", response.status);
     throw Object.assign(

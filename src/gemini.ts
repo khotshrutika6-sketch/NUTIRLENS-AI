@@ -22,7 +22,7 @@ export interface MealAnalysis {
 }
 
 export const DEFAULT_GEMINI_KEY = ""
-export const GEMINI_MODEL = "gemini-2.5-flash"
+export const GEMINI_MODEL = "gemini-3.8-flash"
 
 export async function fileToBase64(file: File): Promise<{ mimeType: string; base64Data: string }> {
   return new Promise((resolve, reject) => {
