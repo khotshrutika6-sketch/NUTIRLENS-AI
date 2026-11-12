@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import analyzeHandler from "../api/scanner/analyze.js";
 import recalculateHandler from "../api/scanner/recalculate.js";
+import { fetchWithTimeout } from "./scanner.js";
 
 const originalFetch = globalThis.fetch;
 const originalEnvironment = { ...process.env };
@@ -47,6 +48,16 @@ afterEach(() => {
     if (!(key in originalEnvironment)) delete process.env[key];
   }
   Object.assign(process.env, originalEnvironment);
+});
+
+test("external provider requests time out with a clear 504 error", async () => {
+  globalThis.fetch = (_input, init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(new Error("Request aborted")), { once: true });
+  });
+  await assert.rejects(
+    fetchWithTimeout("https://example.test", {}, 5, "Test provider"),
+    (error) => error.status === 504 && /Test provider did not respond within/.test(error.message),
+  );
 });
 
 test("analyze authenticates, identifies foods, and scales real database values by portion", async () => {

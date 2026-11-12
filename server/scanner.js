@@ -1,6 +1,9 @@
 import { firebaseConfig } from "../shared/firebase-config.js";
 
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+const AUTH_TIMEOUT_MS = 8_000;
+const GEMINI_TIMEOUT_MS = 25_000;
+const NUTRITION_TIMEOUT_MS = 10_000;
 const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const NUTRIENTS = [
   { key: "calories", names: ["Energy"], ids: [1008, 2047, 2048], unit: "kcal" },
@@ -34,19 +37,39 @@ function methodNotAllowed(req, res, allowed) {
   return true;
 }
 
+async function fetchWithTimeout(url, options, timeoutMs, serviceName) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw Object.assign(
+        new Error(`${serviceName} did not respond within ${Math.round(timeoutMs / 1000)} seconds. Please try again.`),
+        { status: 504 },
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function authenticate(req) {
   const token = req.headers.authorization?.match(/^Bearer (.+)$/i)?.[1];
   if (!token) throw Object.assign(new Error("Please sign in to scan and save meals."), { status: 401 });
 
   const apiKey = process.env.FIREBASE_API_KEY || firebaseConfig.apiKey;
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ idToken: token }),
     },
+    AUTH_TIMEOUT_MS,
+    "Sign-in verification",
   );
   if (!response.ok) throw Object.assign(new Error("Your session expired. Please sign in again."), { status: 401 });
 
@@ -121,7 +144,7 @@ async function identifyFood(image) {
   const prompt = `Examine this food photograph. Return only JSON with this exact shape:
 {"mealName":"short meal title","items":[{"name":"specific visible food item","estimatedWeightG":150,"confidence":0.92,"visibleIngredients":["clearly visible ingredient"],"uncertainIngredients":["ingredient only if visible but uncertain"]}],"notes":"visual portion estimate caveat","freshness":{"label":"Looks Fresh|Needs Attention|Visible Spoilage Signs","observations":["only visible signs"],"uncertain":true}}
 Identify each distinct food on the plate, including Indian dishes and visible sides/garnishes. Give each item's total visible portion in grams and confidence between 0 and 1. Put confidently visible ingredients in visibleIngredients and uncertain visible ingredients in uncertainIngredients. Do not list hidden or inferred ingredients. Only create a separate item for a component when it has its own visible portion to estimate; avoid double counting ingredients. If no food is visible, return {"mealName":"","items":[],"notes":"No food detected","freshness":{"label":"Needs Attention","observations":[],"uncertain":true}}. Assess appearance only, never claim food is safe or unsafe. Do not return nutrition values, bounding boxes, or health advice.`;
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
@@ -131,6 +154,8 @@ Identify each distinct food on the plate, including Indian dishes and visible si
         generationConfig: { responseMimeType: "application/json", temperature: 0.1 },
       }),
     },
+    GEMINI_TIMEOUT_MS,
+    "Gemini",
   );
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
@@ -234,7 +259,12 @@ async function lookupFood(query) {
   const params = new URLSearchParams({ query, pageSize: "10", api_key: apiKey });
   params.append("dataType", "Foundation");
   params.append("dataType", "SR Legacy");
-  const search = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?${params}`);
+  const search = await fetchWithTimeout(
+    `https://api.nal.usda.gov/fdc/v1/foods/search?${params}`,
+    {},
+    NUTRITION_TIMEOUT_MS,
+    "Nutrition database search",
+  );
   if (!search.ok) {
     if (search.status === 401 || search.status === 403) {
       throw Object.assign(new Error("USDA FoodData Central rejected the configured API key. Verify USDA_API_KEY in Vercel."), { status: 503 });
@@ -249,8 +279,11 @@ async function lookupFood(query) {
     .sort((a, b) => b.score - a.score)[0];
   if (!best || best.score < 0.7) return null;
 
-  const detailsResponse = await fetch(
+  const detailsResponse = await fetchWithTimeout(
     `https://api.nal.usda.gov/fdc/v1/food/${encodeURIComponent(best.food.fdcId)}?api_key=${encodeURIComponent(apiKey)}`,
+    {},
+    NUTRITION_TIMEOUT_MS,
+    "Nutrition database lookup",
   );
   if (!detailsResponse.ok) {
     if (detailsResponse.status === 401 || detailsResponse.status === 403) {
@@ -322,6 +355,7 @@ export {
   attachNutrition,
   authenticate,
   calculateTotals,
+  fetchWithTimeout,
   identifyFood,
   methodNotAllowed,
   normalizeFreshness,

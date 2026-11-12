@@ -204,6 +204,7 @@ export default function FoodScanner({
   const [analysis, setAnalysis] = useState<MealAnalysis | null>(null)
   const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({})
   const [scanning, setScanning] = useState(false)
+  const [scanElapsedSeconds, setScanElapsedSeconds] = useState(0)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [history, setHistory] = useState<SavedMeal[]>([])
@@ -213,6 +214,18 @@ export default function FoodScanner({
   const [deletingMealId, setDeletingMealId] = useState<string | null>(null)
   const galleryRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!scanning) {
+      setScanElapsedSeconds(0)
+      return
+    }
+    const startedAt = Date.now()
+    const timer = window.setInterval(() => {
+      setScanElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [scanning])
 
   const calculatedItems = useMemo(() => {
     if (!analysis) return []
@@ -308,11 +321,14 @@ export default function FoodScanner({
     setScanning(true)
     setMessage("")
     setAnalysis(null)
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 58_000)
     try {
       const imageBase64 = await fileToBase64(file)
       const token = await user.getIdToken()
       const response = await fetch("/api/scanner/analyze", {
         method: "POST",
+        signal: controller.signal,
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -326,13 +342,16 @@ export default function FoodScanner({
       if (result.nutritionWarning) setMessage(result.nutritionWarning)
     } catch (error) {
       setMessage(
-        error instanceof TypeError
+        controller.signal.aborted
+          ? "This scan took longer than expected and was stopped. Try a smaller, clearer photo or try again later."
+          : error instanceof TypeError
           ? "Network error: we couldn’t reach the scanner. Check your connection and try again."
           : error instanceof Error
             ? error.message
             : "The analysis failed. Please try again.",
       )
     } finally {
+      window.clearTimeout(timeout)
       setScanning(false)
     }
   }
@@ -577,7 +596,10 @@ export default function FoodScanner({
               <div className="scanner-loading-overlay">
                 <span className="scanner-spinner" />
                 <strong>Looking closely at your meal</strong>
-                <small>Identifying foods and checking nutrition records…</small>
+                <small>
+                  Identifying foods and checking nutrition records… {scanElapsedSeconds}s
+                  {scanElapsedSeconds >= 30 ? " · Still working; please keep this page open." : ""}
+                </small>
               </div>
             )}
           </div>
