@@ -1,9 +1,9 @@
 import { firebaseConfig } from "../shared/firebase-config.js";
 
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
-const AUTH_TIMEOUT_MS = 8_000;
-const GEMINI_TIMEOUT_MS = 25_000;
-const NUTRITION_TIMEOUT_MS = 10_000;
+const AUTH_TIMEOUT_MS = 5_000;
+const GEMINI_TIMEOUT_MS = 20_000;
+const NUTRITION_TIMEOUT_MS = 5_000;
 const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const NUTRIENTS = [
   { key: "calories", names: ["Energy"], ids: [1008, 2047, 2048], unit: "kcal" },

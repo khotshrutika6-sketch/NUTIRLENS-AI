@@ -322,7 +322,7 @@ export default function FoodScanner({
     setMessage("")
     setAnalysis(null)
     const controller = new AbortController()
-    const timeout = window.setTimeout(() => controller.abort(), 58_000)
+    const timeout = window.setTimeout(() => controller.abort(), 38_000)
     try {
       const imageBase64 = await fileToBase64(file)
       const token = await user.getIdToken()
@@ -343,7 +343,7 @@ export default function FoodScanner({
     } catch (error) {
       setMessage(
         controller.signal.aborted
-          ? "This scan took longer than expected and was stopped. Try a smaller, clearer photo or try again later."
+          ? "This scan exceeded 38 seconds and was stopped. Try a smaller, clearer photo or try again later."
           : error instanceof TypeError
           ? "Network error: we couldn’t reach the scanner. Check your connection and try again."
           : error instanceof Error
