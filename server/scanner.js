@@ -144,19 +144,22 @@ async function identifyFood(image) {
   const prompt = `Examine this food photograph. Return only JSON with this exact shape:
 {"mealName":"short meal title","items":[{"name":"specific visible food item","estimatedWeightG":150,"confidence":0.92,"visibleIngredients":["clearly visible ingredient"],"uncertainIngredients":["ingredient only if visible but uncertain"]}],"notes":"visual portion estimate caveat","freshness":{"label":"Looks Fresh|Needs Attention|Visible Spoilage Signs","observations":["only visible signs"],"uncertain":true}}
 Identify each distinct food on the plate, including Indian dishes and visible sides/garnishes. Give each item's total visible portion in grams and confidence between 0 and 1. Put confidently visible ingredients in visibleIngredients and uncertain visible ingredients in uncertainIngredients. Do not list hidden or inferred ingredients. Only create a separate item for a component when it has its own visible portion to estimate; avoid double counting ingredients. If no food is visible, return {"mealName":"","items":[],"notes":"No food detected","freshness":{"label":"Needs Attention","observations":[],"uncertain":true}}. Assess appearance only, never claim food is safe or unsafe. Do not return nutrition values, bounding boxes, or health advice.`;
-  const response = await fetchWithTimeout(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ inlineData: { mimeType: image.mimeType, data: image.base64 } }, { text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.1 },
-      }),
-    },
-    GEMINI_TIMEOUT_MS,
-    "Gemini",
-  );
+  const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const requestOptions = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ inlineData: { mimeType: image.mimeType, data: image.base64 } }, { text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json", temperature: 0.1 },
+    }),
+  };
+  let response;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    response = await fetchWithTimeout(requestUrl, requestOptions, GEMINI_TIMEOUT_MS, "Gemini");
+    if (response.status !== 503 || attempt === 1) break;
+    console.warn("Gemini returned HTTP 503; retrying once after a brief delay.");
+    await new Promise((resolve) => setTimeout(resolve, 750));
+  }
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
       console.error("Gemini authentication failed with HTTP", response.status);

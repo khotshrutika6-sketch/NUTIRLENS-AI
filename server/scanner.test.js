@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import analyzeHandler from "../api/scanner/analyze.js";
 import recalculateHandler from "../api/scanner/recalculate.js";
-import { fetchWithTimeout } from "./scanner.js";
+import { fetchWithTimeout, identifyFood } from "./scanner.js";
 
 const originalFetch = globalThis.fetch;
 const originalEnvironment = { ...process.env };
@@ -58,6 +58,34 @@ test("external provider requests time out with a clear 504 error", async () => {
     fetchWithTimeout("https://example.test", {}, 5, "Test provider"),
     (error) => error.status === 504 && /Test provider did not respond within/.test(error.message),
   );
+});
+
+test("food identification retries one temporary Gemini 503 and returns the successful result", async () => {
+  let geminiRequests = 0;
+  globalThis.fetch = async (input) => {
+    if (String(input).includes("generativelanguage.googleapis.com")) {
+      geminiRequests += 1;
+      if (geminiRequests === 1) {
+        return response({ error: { message: "Temporary capacity issue" } }, 503);
+      }
+      return response({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                mealName: "Rice",
+                items: [{ name: "Rice", estimatedWeightG: 100, confidence: 0.9 }],
+              }),
+            }],
+          },
+        }],
+      });
+    }
+    throw new Error(`Unexpected API request: ${String(input)}`);
+  };
+  const result = await identifyFood({ mimeType: "image/png", base64: png });
+  assert.equal(geminiRequests, 2);
+  assert.equal(result.items[0].name, "Rice");
 });
 
 test("analyze authenticates, identifies foods, and scales real database values by portion", async () => {
