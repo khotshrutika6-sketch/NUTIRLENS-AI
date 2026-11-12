@@ -1,9 +1,9 @@
 export const firebaseConfig = {
-  apiKey: "AIzaSyBHMTgIEvoERMDmL9C8WW7ananmi7EE4Fs",
-  authDomain: "nutrilens-5a81b.firebaseapp.com",
-  projectId: "nutrilens-5a81b",
-  storageBucket: "nutrilens-5a81b.firebasestorage.app",
-  messagingSenderId: "253329617311",
-  appId: "1:253329617311:web:340a7bbbb7be86d3704daa",
-  measurementId: "G-03J347X4ER",
+  apiKey: "AIzaSyDv6a18iGOn7tjYGbaYf0_F9gXSeUu_BYU",
+  authDomain: "nutrilens-ai-667a3.firebaseapp.com",
+  projectId: "nutrilens-ai-667a3",
+  storageBucket: "nutrilens-ai-667a3.firebasestorage.app",
+  messagingSenderId: "142044345266",
+  appId: "1:142044345266:web:29ae9e7541fd6d4de76aab",
+  measurementId: "G-8FT77FL9LS",
 };
