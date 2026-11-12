@@ -133,8 +133,24 @@ Identify each distinct food on the plate, including Indian dishes and visible si
     },
   );
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      console.error("Gemini authentication failed with HTTP", response.status);
+      throw Object.assign(
+        new Error("Gemini rejected the configured API key. Verify GEMINI_API_KEY in Vercel and confirm the Generative Language API is enabled for that key."),
+        { status: 503 },
+      );
+    }
+    if (response.status === 404) {
+      console.error("Gemini model was not found. Check GEMINI_MODEL.");
+      throw Object.assign(new Error(`Gemini model "${model}" is unavailable. Check GEMINI_MODEL in Vercel.`), { status: 503 });
+    }
+    console.error("Gemini request failed with HTTP", response.status);
     throw Object.assign(
-      new Error(response.status === 429 ? "Gemini is busy. Please wait a moment and try again." : "Gemini could not analyze this image. Please try again."),
+      new Error(
+        response.status === 429
+          ? "Gemini is busy. Please wait a moment and try again."
+          : "Gemini is temporarily unavailable. Please try again shortly.",
+      ),
       { status: response.status === 429 ? 429 : 502 },
     );
   }
@@ -203,7 +219,12 @@ async function lookupFood(query) {
   params.append("dataType", "Foundation");
   params.append("dataType", "SR Legacy");
   const search = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?${params}`);
-  if (!search.ok) throw new Error("FoodData Central search is currently unavailable.");
+  if (!search.ok) {
+    if (search.status === 401 || search.status === 403) {
+      throw Object.assign(new Error("USDA FoodData Central rejected the configured API key. Verify USDA_API_KEY in Vercel."), { status: 503 });
+    }
+    throw new Error("FoodData Central search is currently unavailable.");
+  }
   const { foods = [] } = await search.json();
   if (!foods.length) return null;
 
@@ -215,7 +236,12 @@ async function lookupFood(query) {
   const detailsResponse = await fetch(
     `https://api.nal.usda.gov/fdc/v1/food/${encodeURIComponent(best.food.fdcId)}?api_key=${encodeURIComponent(apiKey)}`,
   );
-  if (!detailsResponse.ok) throw new Error("FoodData Central nutrient details are currently unavailable.");
+  if (!detailsResponse.ok) {
+    if (detailsResponse.status === 401 || detailsResponse.status === 403) {
+      throw Object.assign(new Error("USDA FoodData Central rejected the configured API key. Verify USDA_API_KEY in Vercel."), { status: 503 });
+    }
+    throw new Error("FoodData Central nutrient details are currently unavailable.");
+  }
   const food = await detailsResponse.json();
   const nutrientsPer100g = Object.fromEntries(NUTRIENTS.map(({ key, ids, names, unit }) => {
     const found = (food.foodNutrients || []).find((entry) => {
@@ -260,6 +286,7 @@ async function attachNutrition(items) {
         nutritionPer100g: match.nutrientsPer100g,
       };
     } catch (error) {
+      if (error.status === 503) throw error;
       lookupError = true;
       return { ...item, nutritionSource: null, nutritionMatch: null, nutritionPer100g: null };
     }

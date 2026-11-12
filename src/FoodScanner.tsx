@@ -144,15 +144,9 @@ function getErrorMessage(message: string, status: number) {
   if (status === 401) return "Your session expired. Sign in again to scan a meal."
   if (status === 413) return "This image is too large. Choose an image smaller than 3 MB."
   if (status === 429) return "The AI service is busy. Please wait a moment and try again."
-  if (status === 503 && message.toLowerCase().includes("gemini")) {
-    return "Food recognition is not configured yet. Add GEMINI_API_KEY to the backend environment."
-  }
-  if (status === 503 && message.toLowerCase().includes("fooddata")) {
-    return "The nutrition database is not configured yet. Add USDA_API_KEY to the backend environment."
-  }
   if (status === 503) return message
   if (status === 422) return message
-  if (status >= 500) return "We couldn’t complete the analysis. Check your connection and try again."
+  if (status >= 500) return message || "The scanner backend is temporarily unavailable. Check the deployment logs and try again."
   return message || "Please choose a valid food photo and try again."
 }
 

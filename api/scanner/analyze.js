@@ -35,6 +35,7 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     const status = Number.isInteger(error.status) ? error.status : 502;
+    console.error("Scanner analysis failed:", status, error.message);
     return send(res, status, { code: status === 401 ? "unauthorized" : "analysis_failed", error: error.message || "Unable to analyze this meal right now." });
   }
 };

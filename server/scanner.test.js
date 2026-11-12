@@ -114,6 +114,45 @@ test("analyze rejects unauthenticated and unsupported image requests", async () 
   assert.equal(invalidImage.statusCode, 400);
 });
 
+test("analyze reports Gemini credential and model configuration failures clearly", async () => {
+  globalThis.fetch = async (input) => {
+    if (String(input).includes("identitytoolkit.googleapis.com")) return response({ users: [{ localId: "user-1" }] });
+    return response({ error: "provider error details are not exposed" }, 403);
+  };
+  const res = mockResponse();
+  await analyzeHandler(request({ mimeType: "image/png", imageBase64: png }), res);
+  assert.equal(res.statusCode, 503);
+  assert.match(res.body.error, /Gemini rejected the configured API key/);
+  assert.doesNotMatch(res.body.error, /provider error details/);
+});
+
+test("analyze reports USDA credential failures instead of returning empty nutrition", async () => {
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("identitytoolkit.googleapis.com")) return response({ users: [{ localId: "user-1" }] });
+    if (url.includes("generativelanguage.googleapis.com")) {
+      return response({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                mealName: "Rice",
+                items: [{ name: "Rice", estimatedWeightG: 100, confidence: 0.9 }],
+              }),
+            }],
+          },
+        }],
+      });
+    }
+    if (url.includes("/foods/search")) return response({ error: "invalid key" }, 403);
+    throw new Error(`Unexpected API request: ${url}`);
+  };
+  const res = mockResponse();
+  await analyzeHandler(request({ mimeType: "image/png", imageBase64: png }), res);
+  assert.equal(res.statusCode, 503);
+  assert.match(res.body.error, /USDA FoodData Central rejected the configured API key/);
+});
+
 test("recalculate uses returned per-100g nutrients without another provider lookup", async () => {
   globalThis.fetch = async () => response({ users: [{ localId: "user-1" }] });
   const res = mockResponse();
