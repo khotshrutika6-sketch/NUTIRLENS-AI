@@ -26,6 +26,7 @@ functions. The Vite `/api` proxy forwards requests to the local backend.
 To test the scanner, sign in, open **AI Scanner**, choose or capture a JPG, PNG,
 or WEBP image under 3 MB, then select **Analyse my meal**. Adjust detected
 weights and save the report to verify the history and daily-summary views.
-Nutrients come only from FoodData Central matches; values not present in the
-database are displayed as N/A. Freshness is a visual estimate and is not a
-food-safety assessment.
+Nutrients first come from matching FoodData Central records. When a prepared
+dish has no reliable USDA match, the scanner clearly labels a per-100g Gemini
+visual estimate instead of displaying blank or misleading N/A values.
+Freshness is a visual estimate and is not a food-safety assessment.

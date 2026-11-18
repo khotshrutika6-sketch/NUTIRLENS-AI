@@ -143,6 +143,49 @@ test("analyze authenticates, identifies foods, and scales real database values b
   assert.equal(res.body.totals.fat, null);
 });
 
+test("analyze uses labeled visual estimates when no USDA record matches", async () => {
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("identitytoolkit.googleapis.com")) return response({ users: [{ localId: "user-1" }] });
+    if (url.includes("generativelanguage.googleapis.com")) {
+      return response({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                mealName: "Chicken biryani",
+                items: [{
+                  name: "Chicken biryani",
+                  estimatedWeightG: 300,
+                  confidence: 0.9,
+                  nutritionPer100g: {
+                    calories: 180,
+                    carbohydrates: 24,
+                    protein: 12,
+                    fat: 7,
+                    fiber: 2,
+                  },
+                }],
+              }),
+            }],
+          },
+        }],
+      });
+    }
+    if (url.includes("/foods/search")) return response({ foods: [] });
+    throw new Error(`Unexpected API request: ${url}`);
+  };
+
+  const res = mockResponse();
+  await analyzeHandler(request({ mimeType: "image/png", imageBase64: png }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.items[0].nutritionSource, "Gemini visual estimate");
+  assert.equal(res.body.items[0].nutrition.calories.value, 540);
+  assert.equal(res.body.items[0].nutrition.protein.value, 36);
+  assert.equal(res.body.totals.calories.value, 540);
+});
+
 test("analyze rejects unauthenticated and unsupported image requests", async () => {
   const unauthorized = mockResponse();
   await analyzeHandler(request({ mimeType: "image/png", imageBase64: png }, ""), unauthorized);

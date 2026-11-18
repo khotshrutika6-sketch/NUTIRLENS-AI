@@ -663,7 +663,7 @@ export default function FoodScanner({
                   <span>Total meal calories</span>
                   <strong>{nutritionValue(calculatedTotals.calories)}</strong>
                 </div>
-                <span className="scanner-source-pill">USDA FoodData Central</span>
+                <span className="scanner-source-pill">USDA + Visual estimates</span>
               </div>
 
               <div className="scanner-nutrients">
@@ -695,8 +695,10 @@ export default function FoodScanner({
                       )}
                       {item.nutritionMatch ? (
                         <small>{item.nutritionSource}: {item.nutritionMatch.description}</small>
+                      ) : item.nutritionSource ? (
+                        <small className="scanner-unmatched">No matching USDA record; {item.nutritionSource} are used.</small>
                       ) : (
-                        <small className="scanner-unmatched">No matching USDA record; nutrients are N/A.</small>
+                        <small className="scanner-unmatched">No nutrition data available.</small>
                       )}
                       <details className="scanner-item-details">
                         <summary>View nutrient breakdown</summary>

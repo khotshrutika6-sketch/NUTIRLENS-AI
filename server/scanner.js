@@ -136,14 +136,26 @@ function extractJson(text) {
   }
 }
 
+function normalizeEstimatedNutrition(value) {
+  if (!value || typeof value !== "object") return null;
+  const result = {};
+  for (const nutrient of NUTRIENTS) {
+    const amount = Number(value[nutrient.key]);
+    result[nutrient.key] = Number.isFinite(amount) && amount >= 0
+      ? { value: Math.round(amount * 100) / 100, unit: nutrient.unit }
+      : null;
+  }
+  return result;
+}
+
 async function identifyFood(image) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw Object.assign(new Error("Gemini is not configured. Add GEMINI_API_KEY to the server environment."), { status: 503 });
 
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const prompt = `Examine this food photograph. Return only JSON with this exact shape:
-{"mealName":"short meal title","items":[{"name":"specific visible food item","estimatedWeightG":150,"confidence":0.92,"visibleIngredients":["clearly visible ingredient"],"uncertainIngredients":["ingredient only if visible but uncertain"]}],"notes":"visual portion estimate caveat","freshness":{"label":"Looks Fresh|Needs Attention|Visible Spoilage Signs","observations":["only visible signs"],"uncertain":true}}
-Identify each distinct food on the plate, including Indian dishes and visible sides/garnishes. Give each item's total visible portion in grams and confidence between 0 and 1. Put confidently visible ingredients in visibleIngredients and uncertain visible ingredients in uncertainIngredients. Do not list hidden or inferred ingredients. Only create a separate item for a component when it has its own visible portion to estimate; avoid double counting ingredients. If no food is visible, return {"mealName":"","items":[],"notes":"No food detected","freshness":{"label":"Needs Attention","observations":[],"uncertain":true}}. Assess appearance only, never claim food is safe or unsafe. Do not return nutrition values, bounding boxes, or health advice.`;
+{"mealName":"short meal title","items":[{"name":"specific visible food item","estimatedWeightG":150,"confidence":0.92,"visibleIngredients":["clearly visible ingredient"],"uncertainIngredients":["ingredient only if visible but uncertain"],"nutritionPer100g":{"calories":kcalNumber,"carbohydrates":gramsNumber,"protein":gramsNumber,"fat":gramsNumber,"fiber":gramsNumber,"sugar":gramsNumber,"sodium":mgNumber,"potassium":mgNumber,"calcium":mgNumber,"iron":mgNumber,"magnesium":mgNumber,"vitaminA":microgramNumber,"vitaminC":mgNumber,"vitaminD":microgramNumber,"vitaminB12":microgramNumber}}],"notes":"visual portion estimate caveat","freshness":{"label":"Looks Fresh|Needs Attention|Visible Spoilage Signs","observations":["only visible signs"],"uncertain":true}}
+Identify each distinct food on the plate, including Indian dishes and visible sides/garnishes. Give each item's total visible portion in grams and confidence between 0 and 1. Put confidently visible ingredients in visibleIngredients and uncertain visible ingredients in uncertainIngredients. Do not list hidden or inferred ingredients. Only create a separate item for a component when it has its own visible portion to estimate; avoid double counting ingredients. Estimate nutritionPer100g only as a visual fallback for standard prepared portions; use sensible positive numbers or 0 for unknown. If no food is visible, return {"mealName":"","items":[],"notes":"No food detected","freshness":{"label":"Needs Attention","observations":[],"uncertain":true}}. Assess appearance only, never claim food is safe or unsafe. Do not return bounding boxes or medical advice.`;
   const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const requestOptions = {
     method: "POST",
@@ -213,6 +225,7 @@ Identify each distinct food on the plate, including Indian dishes and visible si
       name: item.name.trim().slice(0, 100),
       estimatedWeightG: Math.round(weight),
       confidence: Math.max(0, Math.min(1, confidence)),
+      estimatedNutritionPer100g: normalizeEstimatedNutrition(item.nutritionPer100g),
       visibleIngredients: Array.isArray(item.visibleIngredients)
         ? item.visibleIngredients.filter((entry) => typeof entry === "string").slice(0, 12)
         : [],
@@ -255,32 +268,47 @@ function matchScore(query, candidate) {
   return overlap + (normalizedName(candidate).includes(normalizedName(query)) ? 0.35 : 0);
 }
 
+function foodSearchTerms(query) {
+  const name = normalizedName(query);
+  const terms = [name];
+  if (name.includes("biryani")) terms.push("chicken and rice", "rice cooked", "chicken cooked");
+  if (name.includes("raita")) terms.push("yogurt cucumber", "yogurt plain", "cucumber raw");
+  if (name.includes("curry")) terms.push("curry", "chicken cooked");
+  if (name.includes("rice")) terms.push("rice cooked");
+  if (name.includes("chicken")) terms.push("chicken cooked");
+  return [...new Set(terms.filter(Boolean))].slice(0, 5);
+}
+
 async function lookupFood(query) {
   const apiKey = process.env.NUTRITION_API_KEY || process.env.USDA_API_KEY;
   if (!apiKey) throw Object.assign(new Error("USDA FoodData Central is not configured. Add USDA_API_KEY to the server environment."), { status: 503 });
 
-  const params = new URLSearchParams({ query, pageSize: "10", api_key: apiKey });
-  params.append("dataType", "Foundation");
-  params.append("dataType", "SR Legacy");
-  const search = await fetchWithTimeout(
-    `https://api.nal.usda.gov/fdc/v1/foods/search?${params}`,
-    {},
-    NUTRITION_TIMEOUT_MS,
-    "Nutrition database search",
-  );
-  if (!search.ok) {
-    if (search.status === 401 || search.status === 403) {
-      throw Object.assign(new Error("USDA FoodData Central rejected the configured API key. Verify USDA_API_KEY in Vercel."), { status: 503 });
+  let best = null;
+  for (const term of foodSearchTerms(query)) {
+    const params = new URLSearchParams({ query: term, pageSize: "10", api_key: apiKey });
+    params.append("dataType", "Foundation");
+    params.append("dataType", "SR Legacy");
+    const search = await fetchWithTimeout(
+      `https://api.nal.usda.gov/fdc/v1/foods/search?${params}`,
+      {},
+      NUTRITION_TIMEOUT_MS,
+      "Nutrition database search",
+    );
+    if (!search.ok) {
+      if (search.status === 401 || search.status === 403) {
+        throw Object.assign(new Error("USDA FoodData Central rejected the configured API key. Verify USDA_API_KEY in Vercel."), { status: 503 });
+      }
+      throw new Error("FoodData Central search is currently unavailable.");
     }
-    throw new Error("FoodData Central search is currently unavailable.");
+    const { foods = [] } = await search.json();
+    if (!foods.length) continue;
+    const ranked = foods
+      .map((food) => ({ food, score: matchScore(term, food.description || "") }))
+      .sort((a, b) => b.score - a.score)[0];
+    if (ranked && ranked.score >= 0.7 && (!best || ranked.score > best.score)) best = ranked;
+    if (term === normalizedName(query) && best) break;
   }
-  const { foods = [] } = await search.json();
-  if (!foods.length) return null;
-
-  const best = foods
-    .map((food) => ({ food, score: matchScore(query, food.description || "") }))
-    .sort((a, b) => b.score - a.score)[0];
-  if (!best || best.score < 0.7) return null;
+  if (!best) return null;
 
   const detailsResponse = await fetchWithTimeout(
     `https://api.nal.usda.gov/fdc/v1/food/${encodeURIComponent(best.food.fdcId)}?api_key=${encodeURIComponent(apiKey)}`,
@@ -329,7 +357,12 @@ async function attachNutrition(items) {
     try {
       const match = await lookupFood(item.name);
       if (!match) {
-        return { ...item, nutritionSource: null, nutritionMatch: null, nutritionPer100g: null };
+        return {
+          ...item,
+          nutritionSource: item.estimatedNutritionPer100g ? "Gemini visual estimate" : null,
+          nutritionMatch: null,
+          nutritionPer100g: item.estimatedNutritionPer100g,
+        };
       }
       return {
         ...item,
@@ -340,7 +373,12 @@ async function attachNutrition(items) {
     } catch (error) {
       if (error.status === 503) throw error;
       lookupError = true;
-      return { ...item, nutritionSource: null, nutritionMatch: null, nutritionPer100g: null };
+      return {
+        ...item,
+        nutritionSource: item.estimatedNutritionPer100g ? "Gemini visual estimate" : null,
+        nutritionMatch: null,
+        nutritionPer100g: item.estimatedNutritionPer100g,
+      };
     }
   }));
   return { items: analyzed, totals: calculateTotals(analyzed), lookupError };
