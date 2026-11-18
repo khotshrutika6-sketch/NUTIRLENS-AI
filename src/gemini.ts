@@ -22,7 +22,7 @@ export interface MealAnalysis {
 }
 
 export const DEFAULT_GEMINI_KEY = ""
-export const GEMINI_MODEL = "gemini-3.8-flash"
+export const GEMINI_MODEL = "gemini-2.5-flash"
 
 export async function fileToBase64(file: File): Promise<{ mimeType: string; base64Data: string }> {
   return new Promise((resolve, reject) => {
@@ -51,14 +51,27 @@ export async function analyzeMealWithGemini(
 
   const image = imageSource instanceof File ? await fileToBase64(imageSource) : imageSource
   const token = await user.getIdToken()
-  const response = await fetch("/api/scanner/analyze", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ mimeType: image.mimeType, imageBase64: image.base64Data }),
-  })
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 65_000)
+  let response: Response
+  try {
+    response = await fetch("/api/scanner/analyze", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mimeType: image.mimeType, imageBase64: image.base64Data }),
+    })
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("This scan exceeded 65 seconds. Try a smaller, clearer photo or try again.")
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
+  }
   const result = await response.json()
   if (!response.ok) throw new Error(result.error || "Unable to analyze this meal.")
 
